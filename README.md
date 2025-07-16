@@ -30,7 +30,7 @@ pip install -r requirements.txt
 LogManager follows Loguru's core principle of maintaining a **single global logger instance** throughout the application lifecycle. Instead of creating multiple logger instances, it uses:
 
 - **One Logger**: The same `logger` instance is used across the entire application
-- **Task-Aware Filtering**: Different tasks get different logging behaviors through custo filtering
+- **Task-Aware Filtering**: Different tasks get different logging behaviors through custom filtering
 - **Shared Handlers**: Tasks can share the same set of handlers (console, file, etc.), but each task can configure different minimum log levels for each handler
 - **Dynamic Configuration**: Tasks can be added, removed, or modified at runtime
 
