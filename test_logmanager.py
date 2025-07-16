@@ -28,7 +28,7 @@ def main():
 
     #################################### WITH CONFIG FILE ####################################
     # If config_file is provided, LogManager will use the settings defined in the config file
-    config_file_path = "config.yaml"
+    config_file_path = "example_config.yaml"
     log_manager = LogManager(config_file=config_file_path)
 
     # Get loggers
