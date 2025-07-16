@@ -1,4 +1,3 @@
-
 # LogManager - Task-Aware Logging System
 
 A comprehensive logging manager built on top of [Loguru](https://github.com/Delgan/loguru) that provides task-aware logging with shared handlers across tasks. Designed as a single logger instance throughout the application lifecycle, following Loguru's key design principle of global logger management.
@@ -8,10 +7,9 @@ A comprehensive logging manager built on top of [Loguru](https://github.com/Delg
 - **Task-Aware Logging**: Different logging behaviors for different application components using the same logger instance
 - **Shared Handlers**: All tasks can share the same set of handlers with task-specific filtering
 - **YAML Configuration**: Easy-to-manage configuration files for handlers and task mappings
-- **Multiple Handlers**: Console, file, and custom output handlers
+- **Multiple Handlers**: Multiple output handlers (stdout, files, custom destinations) with task-based routing
 - **Automatic Cleanup**: Proper resource cleanup on program exit
 - **Dynamic Filtering**: Task and level-based log filtering with shared handlers
-- **Timezone Support**: Automatic timezone conversion (Asia/Singapore)
 - **Global Logger**: Single logger instance used throughout the entire application
 
 ## Installation
@@ -23,7 +21,6 @@ pip install -r requirements.txt
 ### Requirements
 - `loguru` - Advanced logging library
 - `pendulum` - Modern date/time handling
-- `pyyaml` - YAML configuration file support
 
 ## Design Philosophy
 
@@ -31,7 +28,7 @@ LogManager follows Loguru's core principle of maintaining a **single global logg
 
 - **One Logger**: The same `logger` instance is used across the entire application
 - **Task-Aware Filtering**: Different tasks get different logging behaviors through custom filtering
-- **Shared Handlers**: Tasks can share the same set of handlers (console, file, etc.), but each task can configure different minimum log levels for each handler
+- **Shared Handlers**: Tasks can share the same set of handlers (stdout, files, custom destinations, etc.), but each task can configure different minimum log levels for each handler
 - **Dynamic Configuration**: Tasks can be added, removed, or modified at runtime
 
 ## Quick Start
@@ -72,10 +69,10 @@ logger_background.debug("Background task message")  # Filtered by background tas
 
 ### YAML Configuration Structure
 
-The LogManager supports YAML configuration files for defining formats, handlers, and task mappings. See the included `logmanager_config.yaml` for a complete example with:
+The LogManager supports YAML configuration files for defining formats, handlers, and task mappings. See the included `example_config.yaml` for a complete example with:
 
 - **Formats**: Define reusable log format templates
-- **Handlers**: Configure shared output destinations (console, file, etc.)
+- **Handlers**: Configure handler with all standard Loguru handler options (sink, format, level, etc.)
 - **Logger Tasks**: Map tasks to handlers with specific minimum log levels
 
 ### Handler Configuration Options
@@ -91,43 +88,65 @@ The LogManager supports YAML configuration files for defining formats, handlers,
 The LogManager uses a **shared handler architecture** where different tasks can use the same set of handlers, and each task can configure different minimum log levels for each shared handler:
 
 **Key Concept**: 
-- **Same Handler, Different Levels**: The `console` handler might be configured to show `DEBUG` messages for the `main` task, `INFO` messages for the `background` task, and `WARNING` messages for the `api` task
+- **Same Handler, Different Levels**: A handler might be configured to show `DEBUG` messages for the `main` task, `INFO` messages for the `background` task, and `WARNING` messages for the `api` task
 - **Efficient Resource Usage**: Instead of creating multiple handlers, one handler serves all tasks with intelligent filtering
 
 ```mermaid
 graph TD
-    A[Single Logger Instance] --> B[Task: main]
-    A --> C[Task: background]
-    A --> D[Task: api]
+    subgraph L1 ["🔗 Single Loguru Instance"]
+        A["🌟 Single Logger Instance<br/>loguru.logger"]
+    end
     
-    B --> E[Filter: console<br/>Level: DEBUG]
-    B --> F[Filter: file<br/>Level: INFO]
+    subgraph L2 ["📋 Task Context Binding"]
+        B["🚀 main<br/>Primary App Logic"]
+        C["⚙️ background<br/>Background Jobs"]
+        D["🌐 api<br/>API Endpoints"]
+    end
     
-    C --> G[Filter: console<br/>Level: INFO]
-    C --> H[Filter: file<br/>Level: DEBUG]
+    subgraph L3 ["🎯 Task-Level Filtering"]
+        E["🔍 Console Filter<br/>📊 Level: DEBUG<br/>🏷️ Task: main"]
+        F["📄 File Filter<br/>📊 Level: INFO<br/>🏷️ Task: main"]
+        G["🔍 Console Filter<br/>📊 Level: INFO<br/>🏷️ Task: background"]
+        H["📄 File Filter<br/>📊 Level: DEBUG<br/>🏷️ Task: background"]
+        I["🔍 Console Filter<br/>📊 Level: WARNING<br/>🏷️ Task: api"]
+        J["📄 File Filter<br/>📊 Level: ERROR<br/>🏷️ Task: api"]
+    end
     
-    D --> I[Filter: console<br/>Level: WARNING]
-    D --> J[Filter: file<br/>Level: ERROR]
+    subgraph L4 ["🔄 Shared Output Handlers"]
+        K["📺 Console Handler<br/>💻 stdout"]
+        L["📁 File Handler<br/>💾 logs directory"]
+    end
     
-    E --> K[Shared Handler: console<br/>📺 Output to stdout]
-    F --> L[Shared Handler: file<br/>📄 Output to .logs/]
+    A ==> B
+    A ==> C
+    A ==> D
+    
+    B -.-> E
+    B -.-> F
+    C -.-> G
+    C -.-> H
+    D -.-> I
+    D -.-> J
+    
+    E --> K
+    F --> L
     G --> K
     H --> L
     I --> K
     J --> L
     
-    style A fill:#e1f5fe
-    style B fill:#f3e5f5
-    style C fill:#f3e5f5
-    style D fill:#f3e5f5
-    style E fill:#c8e6c9
-    style G fill:#c8e6c9
-    style I fill:#c8e6c9
-    style F fill:#ffe0b2
-    style H fill:#ffe0b2
-    style J fill:#ffe0b2
-    style K fill:#e8f5e8
-    style L fill:#fff3e0
+    style A fill:#dbeafe,stroke:#3b82f6,stroke-width:3px,color:#1e40af
+    style B fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#166534
+    style C fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#166534
+    style D fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#166534
+    style E fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    style F fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
+    style G fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    style H fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
+    style I fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    style J fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
+    style K fill:#fee2e2,stroke:#ef4444,stroke-width:3px,color:#991b1b
+    style L fill:#ffedd5,stroke:#f97316,stroke-width:3px,color:#9a3412
 ```
 
 **Note**: The same handler serves multiple tasks with different minimum log levels per task, enabling efficient resource usage while maintaining task-specific filtering.
@@ -140,9 +159,8 @@ The LogManager maintains two internal mappings that coordinate shared handlers w
 2. **Task Map**: `task -> {handler_name: level}` - Shows which handlers each task uses and the minimum log level for each
 
 **Example Scenario**: 
-- The `console` handler is shared by all three tasks but with different minimum levels
-- The `file` handler is also shared by all tasks but with different minimum levels
-- Same handler, different behavior per task
+- Handlers are shared by all three tasks but with different minimum levels
+- The same handler can have different behaviors per task
 
 ```python
 # Shared handlers with task-specific minimum levels
@@ -203,6 +221,26 @@ Remove a shared handler and clean up all associated task mappings.
 ```python
 # Remove shared handler (affects all tasks)
 log_manager.remove_handler_by_name("file")
+```
+
+**Important Notes:**
+- Removing a handler affects **all tasks** that were using it
+- Task mappings are automatically cleaned up when a handler is removed
+- This operation cannot be undone - you'll need to reconfigure the handler if needed
+- Active log messages may be lost if the handler is removed while logging is in progress
+
+**Example:**
+```python
+# Before removal: tasks using multiple handlers
+log_manager.add_task("api", [("console", "WARNING"), ("file", "ERROR")])
+log_manager.add_task("background", [("console", "INFO"), ("file", "DEBUG")])
+
+# Remove file handler - affects both tasks
+log_manager.remove_handler_by_name("file")
+
+# Now tasks only use console handler
+# api task: console (WARNING+)
+# background task: console (INFO+)
 ```
 
 ##### `get_mappings(handlers=True, tasks=True)`
