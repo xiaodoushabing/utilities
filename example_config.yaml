@@ -3,43 +3,42 @@
 
 # Define custom formats
 formats:
-  simple: "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[name]} | {extra[logger_task]} | {file: <16} | {function}:{line} | {message}"
-  fancy: "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{extra[name]}</cyan> | <magenta>{extra[logger_task]}</magenta> | <cyan>{file: <16} | {function}:{line}</cyan> | <level>{message}</level>"
+  simple: "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[logger_name]} | {file: <16} | {function}:{line} | {message}"
+  console: "🧊 <green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{extra[logger_name]}</cyan> | <cyan>{file: <16} | {function}:{line}</cyan> | <level>{message}</level>"
 
 # Define handlers
 handlers:
-  console:
-    sink: "sys.stdout"
-    format: "fancy"
-    level: "DEBUG"
-  
-  file:
+  handler_file:
     sink: ".TEST_LOGS"
     format: "simple"
     level: "DEBUG"
-    colorize: false
-    enqueue: true
-    rotation: "10 MB"
-    retention: "1 week"
+    # retention: "1 week"
+    # rotation: "10 MB"
     # compression: "zip"
+    # serialize: true
+  
+  handler_console:
+    sink: "sys.stdout"
+    format: "console"
+    level: "info"
 
 # Define logger tasks and their associated handlers with levels
-logger_tasks:
-  main:
-    - handler: "console"
-      level: "DEBUG"
-    - handler: "file"
+loggers:
+  logger_a:
+    - handler: "handler_file"
       level: "WARNING"
+    - handler: "handler_console"
+      level: "DEBUG"
 
-  background:
-    - handler: "console"
+  logger_b:
+    - handler: "handler_console"
       level: "INFO"
 
 # Define names for logger tasks
 # Note that these names are used to identify the logger tasks in the configuration,
 # but they are not used in the handler filtering.
 # They are just for reference.
-names:
-  main:
-    - "main"
-    - "background"
+# names:
+#   logger_a:
+#     - "main"
+#     - "background"

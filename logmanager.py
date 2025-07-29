@@ -1,400 +1,397 @@
 import atexit
-import inspect
 import os
-import yaml
 import sys
+import platform
+import time
+import yaml
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 from collections import defaultdict
-import pendulum
+
 from loguru import logger
 
 class LogManager:
     """
-    A comprehensive logging manager that provides task-based logging with configurable handlers.
+    LogManager class to manage logging configuration and handlers.
     
-    This class manages loguru loggers with support for multiple handlers, task-based filtering,
-    and YAML configuration files.
-    
-    Attributes:
-        TZ_UTC8 (pendulum.Timezone): Default timezone for log timestamps.
-        DEFAULT_LOG_DIR (Path): Default directory for log files.
-        DEFAULT_TASK (str): Default task name for logging operations.
+    This class provides a centralized way to manage Loguru loggers and handlers
+    using YAML configuration files. It supports dynamic handler and logger
+    management with automatic cleanup on exit.
     """
-
-    # Define default variables
-    TZ_UTC8 = pendulum.timezone("Asia/Singapore")
-    DEFAULT_LOG_DIR = Path(os.getcwd()) / ".logs"    # Assume run starts from the project root
-    DEFAULT_TASK = "main"
+    DEFAULT_CONFIG_PATH = Path(__file__).parent / "_default_logger_config.yaml"     # Path to the default config file
 
     def __init__(
             self,
-            log_dir: Optional[str] = "",
-            name: Optional[str] = "",
-            task: Optional[str] = "",
-            config_file: Optional[str] = "",
+            config_path: Optional[str] = None,
+            timezone: str = "Asia/Singapore",
     ):
         """
-        Initialize the LogManager with configuration options.
+        Initialize LogManager with a configuration file path and timezone.
         
         Args:
-            log_dir (Optional[str]): Directory path for log files. Defaults to ".logs" in current directory.
-            name (Optional[str]): Logger name. Auto-detected from calling module if not provided.
-            task (Optional[str]): Default task name for logging operations. Defaults to "main".
-            config_file (Optional[str]): Path to YAML configuration file. Uses default settings if not provided.
-            
-        Note:
-            The logger is automatically configured and cleanup is registered for program exit.
+            config_path (Optional[str]): Path to the configuration file. Defaults to None, which uses the default config file.
+            timezone (str): Timezone to set for logging. Default is "Asia/Singapore".
         """
+        # update timezone
+        os.environ["TZ"] = timezone
+        # if platform.system() == "Windows":
+        #     # Windows requires tzset to apply the timezone change
+        #     import time as win_time
+        #     win_time.tzset()
+        # else:
+        #     # For Unix-like systems, use the standard time module
+        #     time.tzset()
+
+        # logger mappers
+        self._handlers_map = defaultdict(dict)  # handler_name -> {id: handler_id, loggers: {logger_name: level}}
+        self._loggers_map = defaultdict(dict)   # logger_name -> [(handler_name, level), ...]
         
-        # Get log directory
-        self.log_dir = Path(log_dir) if log_dir else self.DEFAULT_LOG_DIR
+        # setup logger
+        logger.remove()  # remove default logger
+        self._config_path = config_path         # Empty config_path is handled in _setup_logger
+        self.config = {}
+        self._setup_logger()
 
-        # Logger metadata
-        self.name = name if name else self._get_caller_name()
-        self.task = task if task else self.DEFAULT_TASK
+        # teardown
+        atexit.register(self._cleanup)
 
-        # Logger mappers
-        self.logger_handlers_map = defaultdict(dict)    # handler_name -< dict of {task: level}
-        self.logger_tasks_map = defaultdict(dict)       # task -> dict of {handler_name: level}
-        self.handler_ids = {}                           # handler_name -> handler_id
-
-        # Setup logger
-        logger.remove()  # Remove default logger
-        self.config_file = config_file
-        self._setup_logger(self.config_file)
-
-        # Teardown logger on exit
-        atexit.register(self._teardown_logger)
-
-    ########################################### SETUP LOGGER ###########################################
-    def _setup_logger(self, config_path: Optional[str] = None):
+    ## ------------------------------ SETUP LOGGER ------------------------------ ##
+    def _setup_logger(self):
         """
-        Setup logger with configuration from YAML file or default settings.
+        Setup logger with the provided configuration file or default configuration.
 
-        This method initializes the logger either from a YAML configuration file or
-        with default settings if no config file is provided or if the file is invalid.
-
-        Args:
-            config_path (Optional[str]): Path to the YAML configuration file.
+        This method attempts to load the configuration from the path specified by `self._config_path`.
+        If the file does not exist or is not provided, it falls back to using the class default configuration path (`self.DEFAULT_CONFIG_PATH`).
+        """
+        if not self._config_path:
+            self._config_path = self.DEFAULT_CONFIG_PATH
+            print(f"Config file not provided, initializing logger with class default config.")
+        elif (not os.path.exists(self._config_path) or
+                not os.path.isfile(self._config_path)):
+                self._config_path = self.DEFAULT_CONFIG_PATH
+                print(f"Config file {self._config_path} does not exist or is not a file, initializing logger with class default config.")
             
-        Note:
-            Falls back to default configuration if config file is missing or invalid.
-        """
-        # If no configuration path is provided, add default handler
-        if not config_path or not Path(config_path).is_file():
-            if config_path:
-                print(f"Configuration file {config_path} not found. Using default settings.")
-            print("Initializing logger with default settings.")
-            self._default_logger_setup()
-            logger.info("Logger initialized with default values", logger_task=self.task, name=self.name)
-            return
+        logger.configure(
+            extra = {}
+        )
 
-        # Else, load configuration from YAML file
-        try:
-            self._setup_from_yaml(config_path)
-            logger.info("Logger initialized from configuration file", logger_task=self.task, name=self.name)
-        except Exception as e:
-            logger.error(f"Failed to initialize logger from configuration file: {e}")
-            print(f"Error loading configuration file: {e}")
-            self._default_logger_setup()
+        # load config file
+        with open(self._config_path, "r") as file:
+            self.config = yaml.safe_load(file)
+        
+        # load handlers from config
+        self._load_handlers(self.config)
     
-    def _default_logger_setup(self):
+    def _load_handlers(self, conf: dict):
         """
-        Setup default logger with class defaults.
+        Load handlers and loggers from the provided configuration dictionary.
         
-        Creates console and file handlers with default formatting and filtering.
-        Used as fallback when no configuration file is provided or when config loading fails.
-        
-        Note:
-            Both handlers are configured with DEBUG level and task-based filtering.
-        """
-        
-        # Configure default logger
-        logger.configure(
-            patcher=self.convert_log_time,
-            extra={
-                "name": self.name,
-                "logger_task": self.task,
-            }
-        )
-
-        # Add default handlers
-        handlers = {
-            # Note: A new sink requires a unique handler name
-            "console": {
-                "sink": sys.stdout,
-                "format": "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | "
-                            "<cyan>{extra[name]}</cyan> | <magenta>{extra[logger_task]}</magenta> | <cyan>{file: <16} |"
-                            "{function}:{line}</cyan> | <level>{message}</level>",
-                "level": "DEBUG",
-                "colorize": True,
-                "enqueue": False,
-                "filter": self._make_handler_filter("console"),
-            },
-            "file": {
-                "sink": self.log_dir / f"{self.name}.log",
-                "format": "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | "
-                            "<cyan>{extra[name]}</cyan> | <magenta>{extra[logger_task]}</magenta> | <cyan>{file: <16} |"
-                            "{function}:{line}</cyan> | <level>{message}</level>",
-                "level": "DEBUG",
-                "enqueue": False,
-                "colorize": True,
-                "filter": self._make_handler_filter("file"),
-            }
-        }
-
-        # Add handlers to logger
-        self.setup_handlers(handlers)
-        # Update logger tasks and handlers maps
-        self.add_task(task=self.task, handlers=[("console", "DEBUG"), ("file", "DEBUG")])
-
-    def _setup_from_yaml(self, config_path: str):
-        """
-        Setup logger from YAML configuration file.
-
-        Loads and parses a YAML configuration file to set up handlers, formats, and tasks.
-        Supports custom log formats, multiple handlers, and task-based logging configurations.
-
         Args:
-            config_path (str): Path to the YAML configuration file.
-            
-        Note:
-            The YAML file should contain 'handlers', 'formats', and 'logger_tasks' sections.
-        """
-        
-        # Configure logger
-        logger.configure(
-            patcher=self.convert_log_time,
-            extra={
-                "name": self.name,
-            }
-        )
+            conf (dict): Configuration dictionary containing handlers and loggers.
 
-        # Load YAML configuration
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
+        This method clears any existing handlers and loggers stored in
+        `self._handlers_map` and `self._loggers_map`, then iterates over
+        the handlers and loggers defined in the configuration file to add them
+        via the `_add_handler` and `_add_logger` methods.
 
-        # Load handlers from configuration
-        handlers = config.get("handlers", {})
-        formats = config.get("formats", {})
-        for handler_name, handler_config in handlers.items():
-            # Convert sink string "sys.stdout" and "sys.stderr" to actual objects
-            if handler_config.get("sink") == "sys.stdout":
-                handlers[handler_name]["sink"] = sys.stdout
-            elif handler_config.get("sink") == "sys.stderr":
-                handlers[handler_name]["sink"] = sys.stderr
-            # Ensure level is uppercase
-            if "level" in handler_config:
-                handlers[handler_name]["level"] = handler_config["level"].upper()
-            # Get format for the handler
-            format_str = handler_config.get("format")
-            format = formats[format_str]
-            handlers[handler_name]["format"] = format
-            # Add filter to the handler
-            handlers[handler_name]["filter"] = self._make_handler_filter(handler_name)
-        self.setup_handlers(handlers)
-
-        # Load tasks from configuration
-        logger_tasks = config.get("logger_tasks", {})
-        for task, handlers in logger_tasks.items():
-            filtered_handlers = []
-            for h in handlers:
-                # Add handler name and level to the filtered handlers list. Also ensure level is uppercase
-                filtered_handlers.append((h.get("handler"), h.get("level")))
-            # Update logger tasks and handlers maps
-            self.add_task(task=task, handlers=filtered_handlers)
-
-    ############################################ HANDLER MANAGEMENT ###########################################
-    def setup_handlers(self, handlers: dict):
-        """
-        Setup handlers for the logger.
-
-        Adds multiple handlers to the logger with their respective configurations.
-        Each handler is registered with a unique name and ID for later management.
-
-        Args:
-            handlers (dict): Dictionary of handlers to be added. Each key is the handler name
-                           and value is a dictionary containing handler configuration (sink, format, level, etc.).
-                           
         Raises:
-            ValueError: If a handler name already exists.
-            
-        Note:
-            Clears existing handler IDs before adding new handlers.
+            AssertionError: If 'format' is undefined or not found in the formats 
+                section of the configuration file.
         """
-        self.handler_ids.clear()
-        for handler_name, handler_config in handlers.items():
-            # Ensure handler name is unique
-            if handler_name in self.handler_ids:
-                raise ValueError(f"Handler name '{handler_name}' already exists.")
-            # Add handler to logger
-            self.handler_ids[handler_name] = logger.add(**handler_config)
 
-    def remove_handler_by_name(self, handler_name: str):
+        self._handlers_map.clear()
+        self._loggers_map.clear()
+
+        for _handler_name, _handler_conf in conf.get("handlers", {}).items():
+            # load and configure handler config, and add handler to logger
+            self.add_handler(_handler_name, _handler_conf)
+        
+        for _logger_name, _handlers in conf.get("loggers", {}).items():
+            # load and configure logger config, and add logger to logger
+            self.add_logger(_logger_name, _handlers)
+    
+    ## ------------------------------ HANDLER MANAGEMENT ------------------------------ ##
+    def add_handler(self, handler_name: str, handler_conf: dict):
+        """
+        Configure and add a new handler to the logger.
+
+        Args:
+            handler_name (str): The unique name of the handler to add.
+            handler_conf (dict): The configuration dictionary for the handler.
+
+        Raises:
+            AssertionError: If the handler with the given name already exists.
+                Use update_handler() to modify existing handlers.
+        """
+        assert handler_name not in self._handlers_map, f"Handler {handler_name} already exists. Please use update_handler to modify it."
+        self._handlers_map[handler_name] = {}
+        # modify handler config
+        handler_conf = self._modify_handler_conf(handler_name, handler_conf, self.config.get("formats", {}))
+        # add handler and update handlers map
+        self._handlers_map[handler_name]["id"] = logger.add(**handler_conf)
+
+    def update_handler(self, handler_name: str, handler_conf: dict):
+        """
+        Update an existing handler with the specified configuration.
+        
+        Args:
+            handler_name (str): The name of the handler to update.
+            handler_conf (dict): The new configuration for the handler.
+
+        Raises:
+            AssertionError: If the handler with the given name does not exist.
+                Use add_handler() to create new handlers.
+        """
+        assert handler_name in self._handlers_map, f"Handler {handler_name} does not exist. Please use add_handler to create it."
+        # get current handler info
+        old_handler_id = self._handlers_map[handler_name]["id"]
+        # remove old handler
+        logger.remove(old_handler_id)
+        # modify handler_config if needed
+        handler_conf = self._modify_handler_conf(handler_name, handler_conf, self.config.get("formats", {}))
+        # add new handler and get new handler id
+        new_handler_id = logger.add(**handler_conf)
+        # update handlers map with new handler id
+        self._handlers_map[handler_name]["id"] = new_handler_id
+
+    def remove_handler(self, handler_name: str):
         """
         Remove a handler by its name.
 
-        Removes the specified handler from the logger and cleans up all associated
-        mappings in tasks and handlers maps.
-
         Args:
-            handler_name (str): Name of the handler to be removed.
+            handler_name (str): The name of the handler to remove.
             
         Raises:
-            ValueError: If the handler name doesn't exist.
+            AssertionError: If the handler with the given name does not exist.
             
         Note:
-            This operation will affect all tasks that were using this handler.
+            This will also clean up all logger mappings associated with the handler.
         """
-        if handler_name in self.handler_ids:
-            handler_id = self.handler_ids[handler_name]
-            # Remove handler from logger
-            logger.remove(handler_id)
-            del self.handler_ids[handler_name]
-            # Remove from logger tasks map
-            for task in self.logger_tasks_map:
-                if handler_name in self.logger_tasks_map[task]:
-                    del self.logger_tasks_map[task][handler_name]
-            # Remove from logger handlers map
-            if handler_name in self.logger_handlers_map:
-                del self.logger_handlers_map[handler_name]
-        else:
-            raise ValueError(f"Handler '{handler_name}' does not exist.")
+        assert handler_name in self._handlers_map, f"Handler {handler_name} does not exist."
+        # get current handler info
+        old_handler_id = self._handlers_map[handler_name]["id"]
+        # remove handler
+        logger.remove(old_handler_id)
+        loggers = self._handlers_map.pop(handler_name)["loggers"]
+        self._remove_handler_mapping(handler_name, loggers)
+
+    def _remove_handler_mapping(self, handler_name: str, loggers: dict[str, dict]):
+        """
+        Remove the handler mapping for the specified handler name.
+        
+        Args:
+            handler_name (str): The name of the handler to remove.
+            loggers (dict[str, dict]): A dictionary of loggers associated with the handler.
+            
+        This method cleans up the logger mappings by removing all references to
+        the specified handler from each logger's handler list.
+        """
+        for logger_name in loggers:
+            if logger_name in self._loggers_map:
+                # remove all dicts with 'handler' == handler_name from logger's handlers
+                self._loggers_map[logger_name] = [
+                    h for h in self._loggers_map[logger_name] if h["handler"] != handler_name
+                ]
     
-    ############################################# TASK MANAGEMENT ###########################################
-    def add_task(self, task: str, handlers: list[tuple[str, str]]):
-        """
-        Add a task with its associated handlers and log levels.
+    ## ------------------------------ HANDLER CONFIG HANDLING ------------------------------ ##
 
-        Creates or updates a logging task with specific handlers and their minimum log levels.
-        Tasks allow different parts of an application to have different logging configurations.
+    def _modify_handler_conf(self, handler_name: str, handler_conf: dict, format_conf: dict):
+        """
+        Modify the handler configuration by applying format and other settings.
+
+        This method performs the following operations:
+        - Extracts the format string from the handler configuration and replaces it 
+            with the actual format configuration
+        - Converts the sink string (if it is "sys.stdout" or "sys.stderr") to the 
+            actual stream object
+        - Ensures that the level is in uppercase
+        - Adds a filter to the handler based on the logger mappings
 
         Args:
-            task (str): Name of the task (e.g., "main", "background", "api").
-            handlers (list[tuple[str, str]]): List of tuples containing handler name and minimum log level.
-                                            Example: [("console", "DEBUG"), ("file", "INFO")]
-                                            
-        Raises:
-            ValueError: If the handlers list is empty.
-            
-        Note:
-            If a task already exists, its handler configuration will be updated.
-            Handler levels should be valid loguru levels: DEBUG, INFO, WARNING, ERROR, CRITICAL.
-        """
-        if not handlers:
-            raise ValueError("Handlers list cannot be empty.")
-        for handler_name, level in handlers:
-            # Update logger tasks map
-            self.logger_tasks_map[task][handler_name] = level
-            # Update logger handlers map
-            self.logger_handlers_map[handler_name][task] = level
+            handler_name (str): The name of the handler to modify.
+            handler_conf (dict): The current configuration of the handler.
+            format_conf (dict): The available format configurations.
 
+        Returns:
+            dict: The modified handler configuration.
+
+        Raises:
+            AssertionError: If the 'sink' key is missing or invalid in the handler configuration.
+            AssertionError: If the 'level' key is missing or invalid in the handler configuration.
+            AssertionError: If the 'format' key is missing or invalid in the handler configuration.
+        """
+        assert "sink" in handler_conf, f"Handler {handler_name} must have a 'sink' key. Please define a sink for the handler in the config file."
+        assert "level" in handler_conf, f"Handler {handler_name} must have a 'level' key. Please define a level for the handler in the config file."
+        assert "format" in handler_conf, f"Handler {handler_name} must have a 'format' key. Please define a format for the handler in the config file."
+
+        format_str = handler_conf["format"]
+
+        extracted_format = format_conf.get(format_str, {})
+        if not extracted_format:
+            sys.stderr.write(
+                f" ⚠️ The format referenced by handler '{handler_name}' is not defined in the 'formats' section of the config file."
+                f" Using the format as is: \n"
+                f"\t {format_str} \n\n"
+            )
+        else:
+            handler_conf["format"] = extracted_format
+
+        # convert sink string "sys.stdout" or "sys.stderr" to actual stream objects
+        if handler_conf.get("sink") == "sys.stdout":
+            handler_conf["sink"] = sys.stdout
+        elif handler_conf.get("sink") == "sys.stderr":
+            handler_conf["sink"] = sys.stderr
+        
+        # ensure level is in uppercase
+        handler_conf["level"] = handler_conf["level"].upper()
+
+        # add filter
+        handler_conf["filter"] = self._make_handler_filter(handler_name)
+
+        return handler_conf
+    
     def _make_handler_filter(self, handler_name: str):
         """
-        Create a filter function for the handler based on task and level configuration.
+        Create a filter function for the handler based on the logger mappings.
 
-        Generates a filter function that determines whether a log record should be processed
-        by a specific handler based on the record's task and log level.
+        The returned filter function can be used to determine whether a log
+        record should be processed by the handler. It checks if the logger name
+        is in the handler's loggers mapping and if the log level of the record
+        is greater than or equal to the level specified for that logger in the 
+        handler's mapping.
 
         Args:
-            handler_name (str): Name of the handler to create the filter for.
+            handler_name (str): The name of the handler for which to create the filter.
 
         Returns:
-            function: Filter function that takes a log record and returns True if the record
-                     should be processed by this handler, False otherwise.
-                     
-        Note:
-            The filter uses the logger_task from the log record's extra data and compares
-            the log level against the configured minimum level for the task-handler combination.
+            function: A filter function that takes a log record and returns True if 
+                the record should be processed by the handler, otherwise returns False.
         """
+
         def filter_func(record):
-            task = record["extra"].get("logger_task")
+            logger_name = record["extra"].get("logger_name")
             level = record["level"].no
-            if handler_name in self.logger_handlers_map:
-                if task in self.logger_handlers_map[handler_name]:
-                    return level >= logger.level(self.logger_handlers_map[handler_name][task]).no
+            if (logger_name in self._handlers_map[handler_name].get("loggers", {}) and
+                level >= logger.level(self._handlers_map[handler_name]["loggers"][logger_name]["level"]).no):
+                return True
             return False
         return filter_func
-    
-    ############################################## UTILITY METHODS ###########################################
-    def _get_caller_name(self) -> str:
+
+    ## ------------------------------ LOGGER MANAGEMENT ------------------------------ ##
+    def get_logger(self, logger_name: str):
         """
-        Get the name of the calling module for automatic logger naming.
-
-        Inspects the call stack to determine the filename of the module that
-        instantiated the LogManager, providing automatic logger naming.
-
-        Returns:
-            str: Name of the calling module (filename without extension) or "unknown" if detection fails.
-        """
-        frame = inspect.stack()[2]
-        # module = inspect.getmodule(frame[0])
-        # if module:
-        #     return module.__name__
-        filename = Path(frame.filename).stem
-        return filename if filename else "unknown"
-
-    def convert_log_time(self, record: str):
-        """
-        Convert log timestamps to the configured timezone.
-
-        Patches log records to convert timestamps from UTC to the configured timezone (Asia/Singapore).
-        This function is used as a patcher in loguru's configure method.
+        Retrieve a logger instance bound to the specified logger name.
 
         Args:
-            record (dict): The log record containing timestamp and other log data.
-
-        Note:
-            Modifies the record in-place, converting the 'time' field to TZ_UTC8 timezone.
-            Used internally by loguru's configuration system.
-        """
-        record["time"] = pendulum.instance(record["time"]).in_tz(self.TZ_UTC8)
-
-    def _teardown_logger(self):
-        """
-        Clean up logger resources and remove all handlers on program exit.
-        
-        This method is automatically called when the program exits (registered with atexit).
-        It ensures proper cleanup of all logger handlers and internal data structures.
-        
-        Note:
-            Removes all loguru handlers, clears internal mappings, and prints cleanup confirmation.
-        """
-        print("Exiting LogManager and cleaning up logger.")
-        # Remove all handlers
-        logger.remove()
-        self.handler_ids.clear()
-        self.logger_handlers_map.clear()
-        self.logger_tasks_map.clear()
-        print("Logger has been cleaned up and all handlers removed.")
-
-    ############################################## MAPPINGS ###########################################
-    def get_mappings(self, handlers = True, tasks = True):
-        """
-        Get the current mappings of handlers and tasks for debugging and inspection.
-
-        Provides access to the internal mapping structures that track relationships
-        between handlers, tasks, and log levels.
-
-        Args:
-            handlers (bool): Whether to include handler mappings (handler -> {task: level}).
-            tasks (bool): Whether to include task mappings (task -> {handler: level}).
+            logger_name (str): The name of the logger to retrieve.
 
         Returns:
-            tuple or dict: 
-                - If both handlers and tasks are True: (handlers_map, tasks_map)
-                - If only handlers is True: handlers_map
-                - If only tasks is True: tasks_map
+            Logger: A logger instance bound to the specified logger name.
+
+        Raises:
+            AssertionError: If the logger with the specified name does not exist.
+                Use add_logger() to create new loggers.
+        """
+        assert logger_name in self._loggers_map, f"Logger {logger_name} does not exist. Please add it first."
+        return logger.bind(logger_name=logger_name)
+
+    def add_logger(self, logger_name: str, handlers: list[tuple[str, dict]]):
+        """
+        Add a new logger with the specified name and handlers.
+
+        Args:
+            logger_name (str): The name of the logger to add.
+            handlers (list[tuple[str, dict]]): A list of tuples where each tuple contains 
+                a handler name and its configuration. The handler configuration should be 
+                a dictionary with keys like 'level', 'format', etc.
+
+        Raises:
+            AssertionError: If the logger with the specified name already exists.
+                Use update_logger() to modify existing loggers.
+        """
+        assert logger_name not in self._loggers_map, f"Logger {logger_name} already exists. Please use update_logger to modify it."
+        self._add_logger_mapping(logger_name, handlers)
+        self._loggers_map.update({logger_name: handlers})
+
+    def update_logger(self, logger_name: str, handlers: list[tuple[str, dict]]):
+        """
+        Update an existing logger with the specified name and handlers.
+
+        Args:
+            logger_name (str): The name of the logger to update.
+            handlers (list[tuple[str, dict]]): A list of tuples where each tuple contains 
+                a handler name and its configuration. The handler configuration should be 
+                a dictionary with keys like 'level', 'format', etc.
+        
+        Raises:
+            AssertionError: If the logger with the specified name does not exist.
+                Use add_logger() to create new loggers.
+        """
+        assert logger_name in self._loggers_map, f"Logger {logger_name} does not exist. Please use add_logger to create it."
+        self.remove_logger(logger_name)
+        self.add_logger(logger_name, handlers)
+
+    def remove_logger(self, logger_name: str):
+        """
+        Remove a logger by its name.
+        
+        Args:
+            logger_name (str): The name of the logger to remove.
+        
+        Raises:
+            AssertionError: If the logger with the specified name does not exist.
+            
+        Note:
+            This will also clean up all handler mappings associated with the logger.
+        """
+        assert logger_name in self._loggers_map, f"Logger {logger_name} does not exist."
+        handlers = self._loggers_map.pop(logger_name)
+        self._remove_logger_mapping(logger_name, handlers)
+
+    def _add_logger_mapping(self, logger_name: str, handlers: list[tuple[str, dict]]):
+        """
+        Add a logger mapping for the specified logger name and handlers.
+
+        Args:
+            logger_name (str): The name of the logger to add.
+            handlers (list[tuple[str, dict]]): A list of tuples where each tuple contains 
+                a handler name and its configuration.
                 
-        Note:
-            handlers_map: Maps handler names to their task-level configurations
-            tasks_map: Maps task names to their handler-level configurations
+        This method updates the handlers map to include the logger and its
+        level configuration for each specified handler.
         """
+        for _handler in handlers:
+            handler_name = _handler["handler"]
+            handler_params = {"level": _handler["level"].upper()} 
+            self._handlers_map[handler_name]["loggers"] = self._handlers_map[handler_name].get("loggers", {})
+            self._handlers_map[handler_name]["loggers"][logger_name] = handler_params
+
+    def _remove_logger_mapping(self, logger_name: str, handlers: list[tuple[str, dict]]):
+        """
+        Remove the logger mapping for the specified logger name and handlers.
         
-        if handlers and tasks:
-            return self.logger_handlers_map, self.logger_tasks_map
-        elif handlers:
-            return self.logger_handlers_map
-        elif tasks:
-            return self.logger_tasks_map
+        Args:
+            logger_name (str): The name of the logger to remove.
+            handlers (list[tuple[str, dict]]): A list of tuples where each tuple contains 
+                a handler name and its configuration.
+                
+        This method cleans up the handlers map by removing the logger from
+        each specified handler's logger list.
+        """
+        for _handler in handlers:
+            handler_name = _handler["handler"]
+            if handler_name in self._handlers_map:
+                self._handlers_map[handler_name]["loggers"].pop(logger_name)
+
+    ## ------------------------------ TEARDOWN ------------------------------ ##
+    def _cleanup(self):
+        """
+        Cleanup function to remove all handlers and loggers.
+        
+        This method is automatically called on program exit via atexit.register().
+        It ensures proper cleanup of all Loguru handlers and clears the internal
+        mapping dictionaries.
+        """
+        logger.remove()
+        self._handlers_map.clear()
+        self._loggers_map.clear()
