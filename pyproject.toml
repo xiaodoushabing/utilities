@@ -41,7 +41,7 @@ logmanager = ["*.yaml", "*.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--verbose", "--cov=src"]
+addopts = "--verbose --cov=src --maxfail=2 -ra"
 markers = [
     "unit: marks tests as unit tests (fast, isolated tests for individual components)",
     "integration: marks tests as integration tests (slower tests that verify multiple components work together)",
