@@ -1,5 +1,5 @@
 
-from src.logmanager import LogManager
+from src import LogManager
 from loguru import logger
 
 def main():
@@ -28,7 +28,7 @@ def main():
     # logger_main.success("This is a success message from default_task.")
 
     #################################### WITH CONFIG FILE ####################################
-    config_file = "./example_config.yaml"
+    config_file = "./src/main/example_config.yaml"
     lm = LogManager(config_path=config_file)
 
     # Get loggers

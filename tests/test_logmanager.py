@@ -20,7 +20,7 @@ import os
 import sys
 import yaml
 
-from src.logmanager import LogManager
+from src import LogManager
 
 
 # ========================================================================================

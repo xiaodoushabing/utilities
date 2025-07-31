@@ -12,7 +12,7 @@ import yaml
 import shutil
 from unittest.mock import patch, MagicMock, mock_open
 
-from src.logmanager import LogManager
+from src import LogManager
 
 
 # ========================================================================================
@@ -51,9 +51,9 @@ def mock_logger():
     Usage: def test_something(mock_logger):
            mock_logger.add.assert_called_once()
     """
-    # 🔄 PATCH: Temporarily replace 'src.logmanager.logger' with a fake object
+    # 🔄 PATCH: Temporarily replace 'src.main.logger' with a fake object
     # patch() swaps out the real Loguru logger with a controllable test double
-    with patch('src.logmanager.logger') as mock:  # 🎭 Replace real logger with fake one
+    with patch('src.main.logger') as mock:  # 🎭 Replace real logger with fake one
         
         # 🎪 MAGICMOCK: Fake objects that automatically provide any method/attribute
         # When code calls mock.some_method(), MagicMock pretends it exists and records the call

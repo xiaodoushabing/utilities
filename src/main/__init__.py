@@ -1,11 +1,9 @@
 import atexit
 import os
 import sys
-import platform
-import time
 import yaml
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 from collections import defaultdict
 
 from loguru import logger
