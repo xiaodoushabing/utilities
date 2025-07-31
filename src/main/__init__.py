@@ -1,3 +1,10 @@
+"""
+LogManager - Main module containing the LogManager class.
+
+This module provides the core LogManager class for task-aware logging
+built on top of Loguru.
+"""
+
 import atexit
 import os
 import sys

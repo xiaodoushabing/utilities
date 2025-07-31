@@ -14,13 +14,29 @@ A comprehensive logging manager built on top of [Loguru](https://github.com/Delg
 
 ## Installation
 
+### From Source (Development)
+
 ```bash
-pip install -r requirements.txt
+# Clone the repository
+git clone https://github.com/xiaodoushabing/loguru-logmanager.git
+cd loguru-logmanager
+
+# Install in editable mode with test dependencies
+pip install -e .[test]
 ```
 
-### Requirements
-- `loguru` - Advanced logging library
-- `pendulum` - Modern date/time handling
+### As a Library
+
+```bash
+# Install directly from the project directory
+pip install -e .
+```
+
+After installation, you can import LogManager from anywhere:
+
+```python
+from logmanager import LogManager
+```
 
 ## Design Philosophy
 
@@ -33,7 +49,15 @@ LogManager follows Loguru's core principle of maintaining a **single global logg
 
 ## Quick Start
 
-### Basic Usage (Default Configuration)
+### Step 1: Install the Package
+
+```bash
+# Install from your project directory
+cd /path/to/loguru-logmanager
+pip install -e .
+```
+
+### Step 2: Basic Usage (Default Configuration)
 
 ```python
 from logmanager import LogManager
@@ -42,46 +66,142 @@ from loguru import logger
 # Initialize LogManager once at application startup
 log_manager = LogManager()
 
-# Use the same logger instance throughout the app
-logger_main = logger.bind(logger_task="main")
+# Get a logger for your task
+logger_main = log_manager.get_logger("default_task")
 logger_main.info("Hello, World!")
 ```
 
-### Using YAML Configuration
+### Step 3: Using Custom Configuration
 
 ```python
 from logmanager import LogManager
 from loguru import logger
 
-# Initialize LogManager once at application startup
-log_manager = LogManager(config_file="logmanager_config.yaml")
+# Initialize with custom config file
+log_manager = LogManager(config_path="./path/to/your/config.yaml")
 
-# Use the same logger instance with different task contexts
-logger_main = logger.bind(logger_task="main")
-logger_background = logger.bind(logger_task="background")
+# Get different loggers for different tasks
+logger_a = log_manager.get_logger("logger_a")  # Must exist in config
+logger_b = log_manager.get_logger("logger_b")  # Must exist in config
 
-# Same logger, different filtering based on task
-logger_main.info("Main task message")      # Filtered by main task rules
-logger_background.debug("Background task message")  # Filtered by background task rules
+logger_a.info("Message from logger A")
+logger_b.warning("Warning from logger B")
 ```
 
 ## Configuration
 
-### YAML Configuration Structure
+### Default Configuration
 
-The LogManager supports YAML configuration files for defining formats, handlers, and task mappings. See the included `example_config.yaml` for a complete example with:
+LogManager comes with a built-in default configuration that you can use immediately:
 
-- **Formats**: Define reusable log format templates
-- **Handlers**: Configure handler with all standard Loguru handler options (sink, format, level, etc.)
-- **Logger Tasks**: Map tasks to handlers with specific minimum log levels
+```python
+from logmanager import LogManager
+
+# Uses default config automatically
+lm = LogManager()
+logger_default = lm.get_logger("default_task")
+logger_default.info("This works out of the box!")
+```
+
+### Custom YAML Configuration
+
+For advanced usage, create a YAML configuration file. The LogManager supports YAML configuration files for defining formats, handlers, and logger mappings.
+
+#### Example Configuration File (`my_config.yaml`):
+
+```yaml
+# Define custom formats
+formats:
+  simple: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[logger_name]} | {message}"
+  detailed: "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[logger_name]} | {file: <16} | {function}:{line} | {message}"
+
+# Define handlers
+handlers:
+  console_handler:
+    sink: "sys.stdout"
+    format: "simple"
+    level: "INFO"
+  
+  file_handler:
+    sink: "./logs/app.log"
+    format: "detailed"
+    level: "DEBUG"
+
+# Define loggers and their handlers
+loggers:
+  main_logger:
+    - handler: "console_handler"
+      level: "INFO"
+    - handler: "file_handler"
+      level: "DEBUG"
+  
+  api_logger:
+    - handler: "console_handler"
+      level: "WARNING"
+    - handler: "file_handler"
+      level: "INFO"
+```
+
+#### Using Custom Configuration:
+
+```python
+from logmanager import LogManager
+
+# Load custom configuration
+lm = LogManager(config_path="./my_config.yaml")
+
+# Use the configured loggers
+main_logger = lm.get_logger("main_logger")
+api_logger = lm.get_logger("api_logger")
+
+main_logger.info("Application started")
+api_logger.warning("API rate limit exceeded")
+```
 
 ### Handler Configuration Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `sink` | Output destination | `"sys.stdout"`, `".logs/app.log"` |
-| `format` | Log format (references formats section) | `"detailed"`, `"simple"` |
+| `sink` | Output destination | `"sys.stdout"`, `"./logs/app.log"` |
+| `format` | Log format (references formats section or custom) | `"detailed"`, `"simple"`, `"{time} - {message}"` |
 | `level` | Minimum log level for handler | `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"` |
+
+### Dynamic Logger Management
+
+You can also add, update, and remove loggers and handlers at runtime:
+
+```python
+from logmanager import LogManager
+
+lm = LogManager()
+
+# Add a new handler
+lm.add_handler("new_handler", {
+    "sink": "sys.stderr",
+    "format": "{time} | {level} | {message}",
+    "level": "ERROR"
+})
+
+# Add a new logger that uses the new handler
+lm.add_logger("error_logger", [
+    {"handler": "new_handler", "level": "ERROR"}
+])
+
+# Use the new logger
+error_logger = lm.get_logger("error_logger")
+error_logger.error("This is an error message")
+
+# Update the handler
+lm.update_handler("new_handler", {
+    "sink": "sys.stderr",
+    "format": "🚨 {time} | {level} | {message}",
+    "level": "WARNING"
+})
+
+# Remove when no longer needed
+lm.remove_logger("error_logger")
+lm.remove_handler("new_handler")
+```
 
 ## Task-Handler Mapping
 
@@ -186,162 +306,323 @@ tasks_map = {
 
 ### LogManager Class
 
+### LogManager Class
+
 #### Constructor
 
 ```python
-LogManager(
-    log_dir: Optional[str] = "",
-    name: Optional[str] = "",
-    task: Optional[str] = "",
-    config_file: Optional[str] = ""
-)
+LogManager(config_path: Optional[str] = None, timezone: str = "Asia/Singapore")
 ```
 
-- `log_dir`: Directory for log files (default: ".logs")
-- `name`: Logger name (auto-detected from calling module if not provided)
-- `task`: Default task name (default: "main")
-- `config_file`: Path to YAML configuration file
-
-**Note**: LogManager should be instantiated **once** at application startup and used throughout the application lifecycle.
+- `config_path`: Path to YAML configuration file (uses default config if not provided)
+- `timezone`: Timezone for log timestamps (default: "Asia/Singapore")
 
 #### Methods
 
-##### `add_task(task: str, handlers: list[tuple[str, str]])`
-Add or update task-specific minimum log levels for shared handlers.
+##### `get_logger(logger_name: str) -> Logger`
+Get a configured logger instance.
 
 ```python
-# Configure task to use shared handlers with specific minimum levels
-log_manager.add_task("api", [("console", "WARNING"), ("file", "ERROR")])
-# Now the 'api' task will only send WARNING+ messages to console and ERROR+ messages to file
+# Get a logger that exists in your configuration
+logger = lm.get_logger("main_logger")
+logger.info("Hello from main logger")
 ```
 
-##### `remove_handler_by_name(handler_name: str)`
-Remove a shared handler and clean up all associated task mappings.
+##### `add_handler(handler_name: str, handler_config: dict)`
+Add a new handler to the LogManager.
 
 ```python
-# Remove shared handler (affects all tasks)
-log_manager.remove_handler_by_name("file")
+lm.add_handler("custom_handler", {
+    "sink": "./logs/custom.log",
+    "format": "{time} - {level} - {message}",
+    "level": "INFO"
+})
 ```
 
-**Important Notes:**
-- Removing a handler affects **all tasks** that were using it
-- Task mappings are automatically cleaned up when a handler is removed
-- This operation cannot be undone - you'll need to reconfigure the handler if needed
-- Active log messages may be lost if the handler is removed while logging is in progress
+##### `add_logger(logger_name: str, handler_configs: list[dict])`
+Add a new logger with specified handlers.
 
-**Example:**
 ```python
-# Before removal: tasks using multiple handlers
-log_manager.add_task("api", [("console", "WARNING"), ("file", "ERROR")])
-log_manager.add_task("background", [("console", "INFO"), ("file", "DEBUG")])
-
-# Remove file handler - affects both tasks
-log_manager.remove_handler_by_name("file")
-
-# Now tasks only use console handler
-# api task: console (WARNING+)
-# background task: console (INFO+)
+lm.add_logger("new_logger", [
+    {"handler": "console_handler", "level": "INFO"},
+    {"handler": "file_handler", "level": "DEBUG"}
+])
 ```
 
-##### `get_mappings(handlers=True, tasks=True)`
-Get current handler and task mappings for debugging.
+##### `update_handler(handler_name: str, handler_config: dict)`
+Update an existing handler configuration.
 
 ```python
-handlers_map, tasks_map = log_manager.get_mappings()
+lm.update_handler("console_handler", {
+    "sink": "sys.stdout",
+    "format": "🔥 {time} | {level} | {message}",
+    "level": "DEBUG"
+})
+```
+
+##### `update_logger(logger_name: str, handler_configs: list[dict])`
+Update an existing logger's handler configuration.
+
+```python
+lm.update_logger("main_logger", [
+    {"handler": "console_handler", "level": "WARNING"},
+    {"handler": "new_handler", "level": "ERROR"}
+])
+```
+
+##### `remove_handler(handler_name: str)`
+Remove a handler from the LogManager.
+
+```python
+lm.remove_handler("custom_handler")
+```
+
+##### `remove_logger(logger_name: str)`
+Remove a logger from the LogManager.
+
+```python
+lm.remove_logger("old_logger")
 ```
 
 ## Usage Examples
 
-### Application Lifecycle Pattern
+### Complete Application Example
 
 ```python
 from logmanager import LogManager
-from loguru import logger
 
-# Initialize LogManager once at application startup
-log_manager = LogManager(config_file="config.yaml")
+# Step 1: Initialize LogManager once at application startup
+lm = LogManager(config_path="./config.yaml")
 
-# Use the same logger instance throughout the application
+# Step 2: Use throughout your application
 class APIService:
     def __init__(self):
-        self.logger = logger.bind(logger_task="api")
+        self.logger = lm.get_logger("api_logger")
     
     def process_request(self):
-        self.logger.info("Processing API request")  # Filtered by api task rules
+        self.logger.info("Processing API request")
+        try:
+            # Your API logic here
+            self.logger.info("Request processed successfully")
+        except Exception as e:
+            self.logger.error(f"Request failed: {e}")
 
-class BackgroundWorker:
+class DatabaseService:
     def __init__(self):
-        self.logger = logger.bind(logger_task="background")
+        self.logger = lm.get_logger("db_logger")
     
-    def run_job(self):
-        self.logger.debug("Running background job")  # Filtered by background task rules
+    def connect(self):
+        self.logger.debug("Connecting to database")
+        # Your database logic here
+        self.logger.info("Database connected")
 
 # Main application
 def main():
-    main_logger = logger.bind(logger_task="main")
-    main_logger.info("Application starting")  # Filtered by main task rules
+    # Get the main application logger
+    main_logger = lm.get_logger("main_logger")
+    main_logger.info("Application starting")
     
-    # Same logger instance, different task filtering
+    # Initialize services - they each get their own configured logger
     api = APIService()
-    worker = BackgroundWorker()
+    db = DatabaseService()
     
+    # Use the services
+    db.connect()
     api.process_request()
-    worker.run_job()
+    
+    main_logger.info("Application running")
+
+if __name__ == "__main__":
+    main()
 ```
 
-### Dynamic Task Management
+### Dynamic Configuration Example
 
 ```python
-# Add new task with specific minimum levels for shared handlers
-log_manager.add_task("database", [("file", "ERROR")])
-logger_db = logger.bind(logger_task="database")
-logger_db.error("Database connection failed")  # Only goes to file (ERROR ≥ ERROR)
-logger_db.warning("Database slow")  # Filtered out (WARNING < ERROR)
+from logmanager import LogManager
 
-# Update existing task to use different minimum levels for the same shared handlers
-log_manager.add_task("database", [("console", "WARNING"), ("file", "DEBUG")])
-logger_db.warning("Database performance degraded")  # Now goes to both handlers
-logger_db.debug("Database query executed")  # Only goes to file (DEBUG ≥ DEBUG, but DEBUG < WARNING for console)
+# Start with default configuration
+lm = LogManager()
+
+# Add a custom error handler for critical issues
+lm.add_handler("critical_handler", {
+    "sink": "./logs/critical.log",
+    "format": "🚨 {time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+    "level": "CRITICAL"
+})
+
+# Create a logger for system monitoring
+lm.add_logger("monitor", [
+    {"handler": "critical_handler", "level": "CRITICAL"}
+])
+
+# Use the monitoring logger
+monitor_logger = lm.get_logger("monitor")
+monitor_logger.critical("System overload detected!")
+
+# Later, add console output to monitoring
+lm.update_logger("monitor", [
+    {"handler": "critical_handler", "level": "CRITICAL"},
+    {"handler": "handler_console", "level": "ERROR"}  # Assuming handler_console exists
+])
+
+monitor_logger.error("High memory usage")  # Now appears in console too
 ```
 
-### Custom Handler Configuration
+### Working with Multiple Environments
 
 ```python
-# Initialize LogManager once at application startup
-log_manager = LogManager(
-    log_dir="./custom_logs",
-    name="MyApp",
-    task="service"
-)
+import os
+from logmanager import LogManager
 
-# Use the same logger instance throughout the application
-logger_service = logger.bind(logger_task="service")
-logger_service.info("Service started successfully")
+# Different configs for different environments
+config_file = {
+    "development": "./configs/dev_config.yaml",
+    "staging": "./configs/staging_config.yaml", 
+    "production": "./configs/prod_config.yaml"
+}.get(os.getenv("ENVIRONMENT", "development"))
+
+# Initialize with environment-specific config
+lm = LogManager(config_path=config_file)
+
+# Your application code remains the same
+app_logger = lm.get_logger("app")
+app_logger.info(f"Running in {os.getenv('ENVIRONMENT', 'development')} mode")
 ```
 
 ## Best Practices
 
-1. **Single Instance**: Initialize LogManager once at application startup and use throughout the application lifecycle
-2. **Task-Aware Binding**: Use `logger.bind(logger_task="task_name")` to create task-aware logger contexts
-3. **Shared Handlers**: Configure handlers once and let tasks use them with different minimum log levels rather than creating multiple handlers
-4. **Meaningful Task Names**: Choose task names that reflect different parts of your application (e.g., "api", "database", "background")
-5. **Appropriate Levels**: Configure different minimum log levels for the same handler across different tasks based on their importance and verbosity needs
-6. **Configuration Management**: Use YAML files for complex configurations to keep handler and task definitions organized
+1. **Single Instance**: Initialize LogManager once at application startup
+   ```python
+   # ✅ Good - One instance per application
+   lm = LogManager(config_path="config.yaml")
+   
+   # ❌ Avoid - Multiple instances can cause conflicts
+   lm1 = LogManager()
+   lm2 = LogManager()
+   ```
+
+2. **Meaningful Logger Names**: Use descriptive names that reflect your application components
+   ```python
+   # ✅ Good - Clear, descriptive names
+   api_logger = lm.get_logger("api")
+   db_logger = lm.get_logger("database") 
+   auth_logger = lm.get_logger("authentication")
+   
+   # ❌ Avoid - Generic or unclear names
+   logger1 = lm.get_logger("logger1")
+   temp_logger = lm.get_logger("temp")
+   ```
+
+3. **Configuration Management**: Use YAML files for complex setups
+   ```python
+   # ✅ Good - Centralized configuration
+   lm = LogManager(config_path="./configs/app_config.yaml")
+   
+   # ❌ Avoid - Hardcoded configuration in code
+   lm.add_handler("handler1", {"sink": "stdout", "level": "INFO"})
+   lm.add_handler("handler2", {"sink": "./logs/app.log", "level": "DEBUG"})
+   ```
+
+4. **Environment-Specific Configs**: Different configurations for different environments
+   ```python
+   import os
+   
+   env = os.getenv("ENVIRONMENT", "development")
+   config_file = f"./configs/{env}_config.yaml"
+   lm = LogManager(config_path=config_file)
+   ```
+
+5. **Proper Error Handling**: Always handle logger creation errors
+   ```python
+   try:
+       logger = lm.get_logger("my_logger")
+       logger.info("Logger created successfully")
+   except AssertionError as e:
+       print(f"Logger configuration error: {e}")
+       # Handle the error appropriately
+   ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Configuration File Not Found**: Ensure the YAML file path is correct and the file exists
-2. **Handler Not Working**: Check that handler names in tasks match handler definitions
-3. **No Log Output**: Verify that the task name in `logger.bind(logger_task="task")` matches configured tasks
-4. **Permission Errors**: Ensure the log directory is writable
+1. **ImportError: No module named 'logmanager'**
+   ```bash
+   # Solution: Install the package first
+   pip install -e .
+   ```
+
+2. **AssertionError: Logger 'xyz' does not exist**
+   ```python
+   # Problem: Trying to get a logger that's not configured
+   logger = lm.get_logger("nonexistent_logger")  # ❌
+   
+   # Solution: Either add the logger or check your config
+   lm.add_logger("my_logger", [{"handler": "console_handler", "level": "INFO"}])
+   logger = lm.get_logger("my_logger")  # ✅
+   ```
+
+3. **Configuration File Not Found**
+   ```python
+   # Problem: Wrong path to config file
+   lm = LogManager(config_path="./wrong/path/config.yaml")  # ❌
+   
+   # Solution: Use correct path or relative to working directory
+   lm = LogManager(config_path="./configs/app_config.yaml")  # ✅
+   ```
+
+4. **No Log Output Appearing**
+   ```python
+   # Check your handler levels and logger configuration
+   # Make sure the log level is appropriate
+   logger = lm.get_logger("my_logger")
+   logger.debug("This might not appear if handler level is INFO+")
+   logger.info("This should appear if handler level is INFO+")
+   ```
+
+5. **Permission Errors for Log Files**
+   ```bash
+   # Solution: Ensure the log directory exists and is writable
+   mkdir -p ./logs
+   chmod 755 ./logs
+   ```
 
 ### Debug Mode
 
 ```python
-# Get current mappings to debug configuration
-handlers_map, tasks_map = log_manager.get_mappings()
-print("Handlers:", handlers_map)
-print("Tasks:", tasks_map)
+# Check what loggers are configured
+print("Configured loggers:", list(lm._loggers_map.keys()))
+
+# Check what handlers are available
+print("Available handlers:", list(lm._handlers_map.keys()))
+
+# Inspect a specific logger's configuration
+logger_name = "my_logger"
+if logger_name in lm._loggers_map:
+    print(f"Logger '{logger_name}' config:", lm._loggers_map[logger_name])
+else:
+    print(f"Logger '{logger_name}' not found")
+```
+
+### Testing Your Configuration
+
+```python
+from logmanager import LogManager
+
+# Test with a simple config first
+lm = LogManager()  # Uses default config
+test_logger = lm.get_logger("default_task")
+test_logger.info("Testing default configuration")
+
+# Then test with your custom config
+lm_custom = LogManager(config_path="./your_config.yaml")
+# Test each logger you've configured
+for logger_name in ["main", "api", "database"]:  # Your configured loggers
+    try:
+        logger = lm_custom.get_logger(logger_name)
+        logger.info(f"Testing {logger_name} logger")
+        print(f"✅ {logger_name} logger working")
+    except Exception as e:
+        print(f"❌ {logger_name} logger failed: {e}")
 ```
