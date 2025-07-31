@@ -38,6 +38,41 @@ from logmanager import LogManager
 class TestLogManagerBasics:
     """Basic LogManager functionality tests."""
     
+    def test_mock_logger_injection(self, mock_logger):
+        """Test that mock logger is properly injected and configured.
+        
+        PYTEST: Verify that our mock fixture is working correctly and 
+        has the expected mock behavior configured.
+        """
+        # Verify mock logger is properly configured
+        assert mock_logger is not None
+        
+        # Test that mock methods exist and have expected return values
+        assert hasattr(mock_logger, 'add')
+        assert hasattr(mock_logger, 'remove')
+        assert hasattr(mock_logger, 'bind')
+        assert hasattr(mock_logger, 'configure')
+        
+        # Verify mock return values are set correctly
+        assert mock_logger.add.return_value == '123'
+        assert mock_logger.remove.return_value is None
+        assert mock_logger.configure.return_value is None
+        
+        # Test that mock methods are callable and record calls
+        handler_id = mock_logger.add(sink="test", level="INFO")
+        assert handler_id == '123'
+        mock_logger.add.assert_called_once_with(sink="test", level="INFO")
+        
+        # Test bind method returns a mock
+        bound_logger = mock_logger.bind(logger_name="test")
+        assert bound_logger is not None
+        mock_logger.bind.assert_called_once_with(logger_name="test")
+        
+        # Reset and verify reset works
+        mock_logger.reset_mock()
+        assert mock_logger.add.call_count == 0
+        assert mock_logger.bind.call_count == 0
+    
     def test_logmanager_can_be_created(self, log_manager, default_config):
         """Test basic LogManager creation.
         
@@ -81,6 +116,44 @@ class TestLogManagerBasics:
         
         assert lm._config_path == config_path
         assert lm.config == custom_config
+
+    def test_mock_logger_integration_with_logmanager(self, log_manager, mock_logger):
+        """Test that LogManager operations properly use the mocked logger.
+        
+        PYTEST: Verify that when LogManager performs operations, it actually
+        calls the mocked logger methods, proving the mock injection works.
+        """
+        # Reset mock to start with clean state
+        mock_logger.reset_mock()
+        
+        # Test that get_logger calls mock.bind
+        logger = log_manager.get_logger("logger_a")  # From default config
+        assert logger is not None
+        mock_logger.bind.assert_called_once_with(logger_name="logger_a")
+        
+        # Test that add_handler calls mock.add
+        mock_logger.reset_mock()
+        log_manager.add_handler("test_handler", {
+            'sink': 'sys.stdout',
+            'format': 'simple',
+            'level': 'INFO'
+        })
+        
+        # Verify mock.add was called exactly once
+        mock_logger.add.assert_called_once()
+        
+        # Verify the handler was stored with the mocked return value
+        assert log_manager._handlers_map["test_handler"]["id"] == '123'  # Mock return value
+        
+        # Test that remove_handler calls mock.remove
+        mock_logger.reset_mock()
+        log_manager.remove_handler("test_handler")
+        
+        # Verify mock.remove was called with the stored handler ID
+        mock_logger.remove.assert_called_once_with('123')
+        
+        # Verify handler was removed from internal mapping
+        assert "test_handler" not in log_manager._handlers_map
 
 
 class TestHandlerManagement:
