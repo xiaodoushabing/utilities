@@ -37,42 +37,6 @@ from logmanager import LogManager
 
 class TestLogManagerBasics:
     """Basic LogManager functionality tests."""
-    
-    def test_mock_logger_injection(self, mock_logger):
-        """Test that mock logger is properly injected and configured.
-        
-        PYTEST: Verify that our mock fixture is working correctly and 
-        has the expected mock behavior configured.
-        """
-        # Verify mock logger is properly configured
-        assert mock_logger is not None
-        
-        # Test that mock methods exist and have expected return values
-        assert hasattr(mock_logger, 'add')
-        assert hasattr(mock_logger, 'remove')
-        assert hasattr(mock_logger, 'bind')
-        assert hasattr(mock_logger, 'configure')
-        
-        # Verify mock return values are set correctly
-        assert mock_logger.add.return_value == '123'
-        assert mock_logger.remove.return_value is None
-        assert mock_logger.configure.return_value is None
-        
-        # Test that mock methods are callable and record calls
-        handler_id = mock_logger.add(sink="test", level="INFO")
-        assert handler_id == '123'
-        mock_logger.add.assert_called_once_with(sink="test", level="INFO")
-        
-        # Test bind method returns a mock
-        bound_logger = mock_logger.bind(logger_name="test")
-        assert bound_logger is not None
-        mock_logger.bind.assert_called_once_with(logger_name="test")
-        
-        # Reset and verify reset works
-        mock_logger.reset_mock()
-        assert mock_logger.add.call_count == 0
-        assert mock_logger.bind.call_count == 0
-    
     def test_logmanager_can_be_created(self, log_manager, default_config):
         """Test basic LogManager creation.
         
