@@ -156,11 +156,16 @@ class TestLogManagerInitialization:
         assert lm._config_path == LogManager.DEFAULT_CONFIG_PATH
 
 class TestMappingCleanup:
-    
     """Test handler-logger relationship cleanup."""
     
-    def test_bidirectional_mapping_creation(self, log_manager):
-        """Test that adding handler and logger creates proper bidirectional mapping."""
+    @pytest.fixture
+    def handler_logger_mapping(self, log_manager):
+        """Create a handler-logger bidirectional mapping for testing cleanup behavior.
+        
+        PYTEST: Fixture that sets up the common test scenario - a handler and logger
+        that reference each other bidirectionally. This eliminates duplication across
+        all mapping cleanup tests.
+        """
         # Add handler and logger to create bidirectional mapping
         log_manager.add_handler("test_handler", {
             'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'
@@ -169,57 +174,74 @@ class TestMappingCleanup:
             {'handler': 'test_handler', 'level': 'DEBUG'}
         ])
         
-        # Verify bidirectional mapping exists
-        # Side 1: _loggers_map
-        assert "test_handler" in [h["handler"] for h in log_manager._loggers_map["test_logger"]]
-        # Side 2: _handlers_map
-        assert "test_handler" in log_manager._handlers_map
-        assert "test_logger" in log_manager._handlers_map["test_handler"]["loggers"]
+        # Return both names for easy reference in tests
+        return {
+            'handler_name': 'test_handler',
+            'logger_name': 'test_logger'
+        }
     
-    def test_remove_handler_cleans_mappings(self, log_manager):
+    def test_bidirectional_mapping_creation(self, handler_logger_mapping, log_manager):
+        """Test that adding handler and logger creates proper bidirectional mapping."""
+        handler_name = handler_logger_mapping['handler_name']
+        logger_name = handler_logger_mapping['logger_name']
+        
+        # Verify bidirectional mapping exists
+        # Side 1: _loggers_map should reference handler
+        assert handler_name in [h["handler"] for h in log_manager._loggers_map[logger_name]]
+        # Side 2: _handlers_map should reference logger
+        assert handler_name in log_manager._handlers_map
+        assert logger_name in log_manager._handlers_map[handler_name]["loggers"]
+    
+    def test_remove_handler_cleans_mappings(self, handler_logger_mapping, log_manager):
         """Test that removing handler cleans up references in bidirectional mapping."""
-        # Setup: Add handler and logger to create bidirectional mapping
-        log_manager.add_handler("test_handler", {
-            'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'
-        })
-        log_manager.add_logger("test_logger", [
-            {'handler': 'test_handler', 'level': 'DEBUG'}
-        ])
+        handler_name = handler_logger_mapping['handler_name']
+        logger_name = handler_logger_mapping['logger_name']
         
         # Remove handler
-        log_manager.remove_handler("test_handler")
+        log_manager.remove_handler(handler_name)
         
         # Verify bidirectional cleanup:
         # Side 1: Logger should still exist but with no handler references
-        assert "test_logger" in log_manager._loggers_map  # Logger still exists
-        remaining_handlers = [h["handler"] for h in log_manager._loggers_map["test_logger"]]
-        assert "test_handler" not in remaining_handlers  # But handler reference removed
+        assert logger_name in log_manager._loggers_map  # Logger still exists
+        remaining_handlers = [h["handler"] for h in log_manager._loggers_map[logger_name]]
+        assert handler_name not in remaining_handlers  # But handler reference removed
         # Side 2: Handler should be completely removed from _handlers_map
-        assert "test_handler" not in log_manager._handlers_map
+        assert handler_name not in log_manager._handlers_map
     
-    def test_remove_logger_cleans_handler_mappings(self, log_manager):
+    def test_remove_logger_cleans_handler_mappings(self, handler_logger_mapping, log_manager):
         """Test that removing logger cleans up handler references in bidirectional mapping."""
-        # Add handler and logger to create bidirectional mapping
+        handler_name = handler_logger_mapping['handler_name']
+        logger_name = handler_logger_mapping['logger_name']
+        
+        # Remove logger
+        log_manager.remove_logger(logger_name)
+        
+        # Verify bidirectional cleanup:
+        # Side 1: Logger should be completely removed from _loggers_map
+        assert logger_name not in log_manager._loggers_map
+        # Side 2: Handler should still exist but with no logger references
+        assert handler_name in log_manager._handlers_map  # Handler still exists
+        assert logger_name not in log_manager._handlers_map[handler_name]["loggers"]  # But logger reference removed
+        assert len(log_manager._handlers_map[handler_name]["loggers"]) == 0  # Handler should have no loggers
+
+class TestCleanupBehavior:
+    """Test cleanup and teardown functionality."""
+    
+    @pytest.fixture
+    def populated_log_manager(self, log_manager):
+        """Fixture that provides a LogManager with some test data for cleanup testing.
+        
+        PYTEST: Creates a LogManager instance with test handlers and loggers already
+        configured, so cleanup tests can verify that data is properly cleared.
+        """
+        # Add some data first to create bidirectional mappings
         log_manager.add_handler("test_handler", {
             'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'
         })
         log_manager.add_logger("test_logger", [
             {'handler': 'test_handler', 'level': 'DEBUG'}
         ])
-        
-        # Remove logger
-        log_manager.remove_logger("test_logger")
-        
-        # Verify bidirectional cleanup:
-        # Side 1: Logger should be completely removed from _loggers_map
-        assert "test_logger" not in log_manager._loggers_map
-        # Side 2: Handler should still exist but with no logger references
-        assert "test_handler" in log_manager._handlers_map  # Handler still exists
-        assert "test_logger" not in log_manager._handlers_map["test_handler"]["loggers"]  # But logger reference removed
-        assert len(log_manager._handlers_map["test_handler"]["loggers"]) == 0  # Handler should have no loggers
-
-class TestCleanupBehavior:
-    """Test cleanup and teardown functionality."""
+        return log_manager
     
     def test_cleanup_removes_all_handlers(self, log_manager, mock_logger):
         """Test that cleanup removes all loguru handlers."""
@@ -227,18 +249,14 @@ class TestCleanupBehavior:
         log_manager._cleanup()
         mock_logger.remove.assert_called_once()  # Should remove all handlers
     
-    def test_cleanup_clears_internal_mappings(self, log_manager):
+    def test_cleanup_clears_internal_mappings(self, populated_log_manager):
         """Test that cleanup clears internal data structures."""
-        # Add some data first to create bidirectional mappings
-        log_manager.add_handler("test_handler", {'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'})
-        log_manager.add_logger("test_logger", [{'handler': 'test_handler', 'level': 'DEBUG'}])
-        
-        # Cleanup
-        log_manager._cleanup()
+        # Cleanup the populated log manager
+        populated_log_manager._cleanup()
         
         # Verify both sides of bidirectional mapping are cleared
-        assert len(log_manager._handlers_map) == 0
-        assert len(log_manager._loggers_map) == 0
+        assert len(populated_log_manager._handlers_map) == 0
+        assert len(populated_log_manager._loggers_map) == 0
     
 class TestHandlerFilterBehavior:
     """Test handler filter function creation and behavior."""
