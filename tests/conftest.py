@@ -133,11 +133,3 @@ def log_manager(mock_logger, default_config):
         # When LogManager calls open(DEFAULT_CONFIG_PATH, 'r'), it gets our fake default_config
         # converted to YAML string instead of reading the real default config file
         return LogManager()  # ← NO config_path = uses DEFAULT_CONFIG_PATH
-
-
-# ========================================================================================
-# PYTEST CONFIGURATION
-# ========================================================================================
-
-# Global test markers for categorizing tests
-pytestmark = pytest.mark.unit

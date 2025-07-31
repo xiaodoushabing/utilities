@@ -19,9 +19,11 @@ import pytest
 import os
 import sys
 import yaml
+from unittest.mock import patch, MagicMock
 
 from logmanager import LogManager
 
+pytestmark = pytest.mark.unit
 
 # ========================================================================================
 # PYTEST LEARNING TIP 💡
@@ -34,7 +36,6 @@ from logmanager import LogManager
 # 🎭 Mocking: Replace real dependencies with controllable fakes
 # 🧪 Assertions: Verify expected behavior
 # ========================================================================================
-
 class TestLogManagerBasics:
     """Basic LogManager functionality tests."""
     def test_logmanager_can_be_created(self, log_manager, default_config):
@@ -119,7 +120,183 @@ class TestLogManagerBasics:
         # Verify handler was removed from internal mapping
         assert "test_handler" not in log_manager._handlers_map
 
+class TestLogManagerInitialization:
+    """Test LogManager initialization and setup behavior."""
+    
+    def test_timezone_environment_variable_set(self, mock_logger):
+        """Test that timezone is properly set in environment."""
+        custom_timezone = "UTC"
+        lm = LogManager(timezone=custom_timezone)
+        assert os.environ["TZ"] == custom_timezone
+    
+    def test_default_timezone_applied(self, mock_logger):
+        """Test default timezone is set when none provided."""
+        lm = LogManager()
+        assert os.environ["TZ"] == "Asia/Singapore"
+    
+    def test_atexit_cleanup_registered(self, mock_logger):
+        """Test that cleanup function is registered with atexit."""
+        with patch('atexit.register') as mock_atexit:
+            lm = LogManager()
+            mock_atexit.assert_called_once_with(lm._cleanup)
+    
+    def test_logger_removal_during_init(self, mock_logger):
+        """Test that default logger is removed during initialization."""
+        LogManager()
+        mock_logger.remove.assert_called()  # Should remove default handlers
 
+    def test_nonexistent_config_fallback_to_default(self, mock_logger):
+        """Test fallback to default config when file doesn't exist."""
+        lm = LogManager(config_path="nonexistent.yaml")
+        assert lm._config_path == LogManager.DEFAULT_CONFIG_PATH
+    
+    def test_invalid_file_path_fallback(self, mock_logger, temp_dir):
+        """Test fallback when config_path is a directory, not a file."""
+        lm = LogManager(config_path=temp_dir)
+        assert lm._config_path == LogManager.DEFAULT_CONFIG_PATH
+
+class TestMappingCleanup:
+    
+    """Test handler-logger relationship cleanup."""
+    
+    def test_bidirectional_mapping_creation(self, log_manager):
+        """Test that adding handler and logger creates proper bidirectional mapping."""
+        # Add handler and logger to create bidirectional mapping
+        log_manager.add_handler("test_handler", {
+            'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'
+        })
+        log_manager.add_logger("test_logger", [
+            {'handler': 'test_handler', 'level': 'DEBUG'}
+        ])
+        
+        # Verify bidirectional mapping exists
+        # Side 1: _loggers_map
+        assert "test_handler" in [h["handler"] for h in log_manager._loggers_map["test_logger"]]
+        # Side 2: _handlers_map
+        assert "test_handler" in log_manager._handlers_map
+        assert "test_logger" in log_manager._handlers_map["test_handler"]["loggers"]
+    
+    def test_remove_handler_cleans_mappings(self, log_manager):
+        """Test that removing handler cleans up references in bidirectional mapping."""
+        # Setup: Add handler and logger to create bidirectional mapping
+        log_manager.add_handler("test_handler", {
+            'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'
+        })
+        log_manager.add_logger("test_logger", [
+            {'handler': 'test_handler', 'level': 'DEBUG'}
+        ])
+        
+        # Remove handler
+        log_manager.remove_handler("test_handler")
+        
+        # Verify bidirectional cleanup:
+        # Side 1: Logger should still exist but with no handler references
+        assert "test_logger" in log_manager._loggers_map  # Logger still exists
+        remaining_handlers = [h["handler"] for h in log_manager._loggers_map["test_logger"]]
+        assert "test_handler" not in remaining_handlers  # But handler reference removed
+        # Side 2: Handler should be completely removed from _handlers_map
+        assert "test_handler" not in log_manager._handlers_map
+    
+    def test_remove_logger_cleans_handler_mappings(self, log_manager):
+        """Test that removing logger cleans up handler references in bidirectional mapping."""
+        # Add handler and logger to create bidirectional mapping
+        log_manager.add_handler("test_handler", {
+            'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'
+        })
+        log_manager.add_logger("test_logger", [
+            {'handler': 'test_handler', 'level': 'DEBUG'}
+        ])
+        
+        # Remove logger
+        log_manager.remove_logger("test_logger")
+        
+        # Verify bidirectional cleanup:
+        # Side 1: Logger should be completely removed from _loggers_map
+        assert "test_logger" not in log_manager._loggers_map
+        # Side 2: Handler should still exist but with no logger references
+        assert "test_handler" in log_manager._handlers_map  # Handler still exists
+        assert "test_logger" not in log_manager._handlers_map["test_handler"]["loggers"]  # But logger reference removed
+        assert len(log_manager._handlers_map["test_handler"]["loggers"]) == 0  # Handler should have no loggers
+
+class TestCleanupBehavior:
+    """Test cleanup and teardown functionality."""
+    
+    def test_cleanup_removes_all_handlers(self, log_manager, mock_logger):
+        """Test that cleanup removes all loguru handlers."""
+        mock_logger.reset_mock()
+        log_manager._cleanup()
+        mock_logger.remove.assert_called_once()  # Should remove all handlers
+    
+    def test_cleanup_clears_internal_mappings(self, log_manager):
+        """Test that cleanup clears internal data structures."""
+        # Add some data first to create bidirectional mappings
+        log_manager.add_handler("test_handler", {'sink': 'sys.stdout', 'format': 'simple', 'level': 'INFO'})
+        log_manager.add_logger("test_logger", [{'handler': 'test_handler', 'level': 'DEBUG'}])
+        
+        # Cleanup
+        log_manager._cleanup()
+        
+        # Verify both sides of bidirectional mapping are cleared
+        assert len(log_manager._handlers_map) == 0
+        assert len(log_manager._loggers_map) == 0
+    
+class TestHandlerFilterBehavior:
+    """Test handler filter function creation and behavior."""
+    
+    @pytest.fixture
+    def handler_logger_setup(self, log_manager):
+        """Setup handler and logger for filter testing.
+        
+        PYTEST: Fixture that provides pre-configured handler and logger for all filter tests.
+        This eliminates duplication across multiple test methods.
+        """
+        # Add a handler with ERROR level threshold
+        log_manager.add_handler("test_handler", {
+            'sink': 'sys.stdout', 'format': 'simple', 'level': 'ERROR'
+        })
+        
+        # Add a logger that uses this handler with DEBUG level
+        log_manager.add_logger("test_logger", [
+            {'handler': 'test_handler', 'level': 'DEBUG'}
+        ])
+        
+        # Return the filter function for testing
+        return log_manager._make_handler_filter("test_handler")
+    
+    @pytest.mark.parametrize("logger_name,record_level,expected_result,test_description", [
+        # Test correct logger with various levels against ERROR (40) threshold defined by handler
+        ("test_logger", 50, True, "allows correct logger with CRITICAL level (50 >= 40)"),
+        ("test_logger", 40, True, "allows correct logger with ERROR level (40 >= 40)"),
+        ("test_logger", 30, False, "blocks correct logger with WARNING level (30 < 40)"),
+        ("test_logger", 20, False, "blocks correct logger with INFO level (20 < 40)"),
+        ("test_logger", 10, False, "blocks correct logger with DEBUG level (10 < 40)"),
+        # Test wrong logger (should always block regardless of level)
+        ("different_logger", 50, False, "blocks logs from unassociated loggers"),
+        ("different_logger", 10, False, "blocks logs from unassociated loggers"),
+        # Edge cases
+        ("", 50, False, "blocks empty logger name"),
+    ])
+    def test_handler_filter_behavior(self, handler_logger_setup, mock_logger, 
+                                   logger_name, record_level, expected_result, test_description):
+        """Test handler filter behavior with various logger names and levels.
+        
+        PYTEST: Parametrized test covering all filter scenarios against handler's configured threshold.
+        The handler is configured with ERROR level (40), so only ERROR and above should pass.
+        """
+        filter_func = handler_logger_setup
+        
+        # Create mock record
+        mock_record = {
+            "extra": {"logger_name": logger_name},
+            "level": MagicMock(no=record_level)
+        }
+        
+        # Mock logger.level() to return ERROR level (40) - this should match handler config
+        mock_logger.level.return_value = MagicMock(no=40)
+        
+        # Test filter behavior
+        result = filter_func(mock_record)
+        assert result == expected_result, f"Filter {test_description}"
 class TestHandlerManagement:
     """Test handler CRUD operations."""
     
@@ -460,129 +637,3 @@ class TestNonexistentEntityOperations:
             log_manager.add_logger('forward_ref_logger', logger_config)
 
 
-# ========================================================================================
-# PYTEST LEARNING TIP 💡
-# Integration tests verify that multiple components work together correctly.
-# They're more complex than unit tests but catch issues that unit tests might miss.
-# ========================================================================================
-
-class TestIntegrationScenarios:
-    """Test realistic usage patterns and integration scenarios."""
-    
-    def test_complete_workflow_simulation(self, log_manager, mock_logger):
-        """Test a complete workflow similar to the original test_logger.py.
-        
-        PYTEST: Integration test combines multiple operations to test real-world usage.
-        This ensures individual components work together correctly.
-        """
-        # 1. Get pre-configured loggers
-        logger_a = log_manager.get_logger("logger_a")
-        logger_b = log_manager.get_logger("logger_b")
-        
-        # Verify initial state
-        assert logger_a is not None
-        assert logger_b is not None
-        
-        # 2. Test error case - getting nonexistent logger
-        # This should raise an error since logger_c is not defined in the config file
-        with pytest.raises(AssertionError, match="does not exist"):
-            log_manager.get_logger("logger_c")
-        
-        # 3. Add new custom handler with fire emoji
-        mock_logger.reset_mock()
-        log_manager.add_handler("handler_console_fire", {
-            "sink": "sys.stdout",
-            "level": "info",
-            "format": "🔥 <green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | {extra[logger_name]} | {file: <16} | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
-        })
-        
-        # 4. Add new logger using the fire handler
-        log_manager.add_logger("logger_c", [{'handler': 'handler_console_fire', 'level': 'debug'}])
-        
-        # Now logger_c should be available
-        logger_c = log_manager.get_logger("logger_c")
-        assert logger_c is not None
-        assert "handler_console_fire" in log_manager._handlers_map
-        assert "logger_c" in log_manager._loggers_map
-        
-        # 5. Add another handler with format reference
-        log_manager.add_handler("handler_console_fire2", {
-            "sink": "sys.stdout",
-            "level": "info",
-            "format": "simple"  # References format from config
-        })
-        
-        # 6. Update handler test
-        mock_logger.reset_mock()
-        log_manager.update_handler("handler_console_fire", {
-            "sink": "sys.stdout",
-            "level": "debug",
-            "format": "🧯 <green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | {extra[logger_name]} | {file: <16} | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
-        })
-        
-        # Verify handler was updated (remove old, add new)
-        mock_logger.remove.assert_called_once_with('123')  # Mock ID
-        mock_logger.add.assert_called_once()
-        
-        # 7. Update logger with multiple handlers
-        log_manager.update_logger("logger_c", [
-            {'handler': 'handler_console_fire', 'level': 'ERROR'},
-            {'handler': 'handler_console', 'level': 'error'}
-        ])
-        
-        # Verify logger was updated with multiple handlers
-        logger_c_config = log_manager._loggers_map["logger_c"]
-        assert len(logger_c_config) == 2
-        handler_names = [cfg['handler'] for cfg in logger_c_config]
-        assert 'handler_console_fire' in handler_names
-        assert 'handler_console' in handler_names
-        
-        # 8. Remove logger test
-        log_manager.remove_logger("logger_c")
-        assert "logger_c" not in log_manager._loggers_map
-        
-        # Logger should still exist but not be managed by LogManager
-        # (This simulates the behavior where removed loggers can still log but aren't managed)
-        
-        # 9. Remove handler test
-        mock_logger.reset_mock()
-        log_manager.remove_handler("handler_console")
-        
-        # Verify handler was removed from logger and internal mapping
-        mock_logger.remove.assert_called_once_with('123')  # Mock ID
-        assert "handler_console" not in log_manager._handlers_map
-        
-        # Verify remaining loggers still work
-        remaining_logger = log_manager.get_logger("logger_a")
-        assert remaining_logger is not None
-    
-    def test_edge_cases_and_error_handling(self, log_manager):
-        """Test edge cases and error handling scenarios from real usage.
-        
-        PYTEST: Integration test for error scenarios that might occur in production.
-        """
-        # Test adding logger with nonexistent handler reference
-        # This should NOT be allowed - validation should prevent forward references
-        with pytest.raises(KeyError, match="future_handler"):
-            log_manager.add_logger('forward_ref_logger', [
-                {'handler': 'future_handler', 'level': 'INFO'}
-            ])
-        
-        # Test format reference vs custom format handling
-        # Format reference (should look up in config)
-        log_manager.add_handler('ref_format_handler', {
-            'sink': 'sys.stdout',
-            'format': 'simple',  # References config format
-            'level': 'INFO'
-        })
-        
-        # Custom format (should be used as-is)
-        log_manager.add_handler('custom_format_handler', {
-            'sink': 'sys.stdout', 
-            'format': '{time} | CUSTOM | {message}',  # Custom format
-            'level': 'INFO'
-        })
-        
-        # Both handlers should be added successfully
-        assert 'ref_format_handler' in log_manager._handlers_map
-        assert 'custom_format_handler' in log_manager._handlers_map

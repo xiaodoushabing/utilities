@@ -50,6 +50,23 @@ class LogManager:
         # logger mappers
         self._handlers_map = defaultdict(dict)  # handler_name -> {id: handler_id, loggers: {logger_name: level}}
         self._loggers_map = defaultdict(dict)   # logger_name -> [(handler_name, level), ...]
+
+        # _handlers_map = {
+        #     "handler_console": {
+        #         "id": "123",
+        #         "loggers": {
+        #             "logger_a": {"level": "DEBUG"},
+        #             "logger_b": {"level": "INFO"}
+        #         }
+        #     }
+        # }
+
+        # _loggers_map = {
+        #     "logger_a": [
+        #         {'handler': 'handler_console', 'level': 'DEBUG'},
+        #         {'handler': 'handler_file', 'level': 'INFO'}
+        #     ]
+        # }
         
         # setup logger
         logger.remove()  # remove default logger
