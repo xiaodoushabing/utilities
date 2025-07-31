@@ -362,6 +362,9 @@ class LogManager:
         """
         for _handler in handlers:
             handler_name = _handler["handler"]
+
+            if handler_name not in self._handlers_map:
+                raise KeyError(f"Handler '{handler_name}' does not exist. Please add the handler before referencing it in a logger.")
             handler_params = {"level": _handler["level"].upper()} 
             self._handlers_map[handler_name]["loggers"] = self._handlers_map[handler_name].get("loggers", {})
             self._handlers_map[handler_name]["loggers"][logger_name] = handler_params

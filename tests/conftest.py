@@ -8,8 +8,6 @@ available to all test files in this directory.
 
 import pytest
 import tempfile
-import os
-import sys
 import yaml
 import shutil
 from unittest.mock import patch, MagicMock, mock_open

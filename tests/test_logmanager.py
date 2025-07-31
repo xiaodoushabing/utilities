@@ -19,7 +19,6 @@ import pytest
 import os
 import sys
 import yaml
-from unittest.mock import patch, mock_open
 
 from src.logmanager import LogManager
 
@@ -68,7 +67,11 @@ class TestLogManagerBasics:
     def test_config_loading_from_custom_path(self, mock_logger, temp_dir):
         """Test loading config from custom file path."""
         # Create a simple config file
-        custom_config = {'formats': {'test': '{message}'}, 'handlers': {}, 'loggers': {}}
+        custom_config = {
+            'formats': {'test': '{message}'},
+            'handlers': {},
+            'loggers': {}
+            }
         config_path = os.path.join(temp_dir, 'custom.yaml')
         
         with open(config_path, 'w') as f:
@@ -252,8 +255,8 @@ class TestLoggerManagement:
         list[dict] where each dict has 'handler' and 'level' keys
         """
         return {
-            'single_handler': [{'handler': 'handler_console', 'level': 'INFO'}],
-            'multi_handler': [
+            'single_logger': [{'handler': 'handler_console', 'level': 'INFO'}],
+            'multi_logger': [
                 {'handler': 'handler_console', 'level': 'INFO'},
                 {'handler': 'handler_file', 'level': 'DEBUG'}
             ]
@@ -262,7 +265,7 @@ class TestLoggerManagement:
     def test_add_logger(self, log_manager, sample_logger_configs):
         """Test adding a new logger."""
         logger_name = 'test_logger'
-        config = sample_logger_configs['single_handler']  # Get config from fixture
+        config = sample_logger_configs['single_logger']  # Get config from fixture
         
         log_manager.add_logger(logger_name, config)
         
@@ -275,11 +278,11 @@ class TestLoggerManagement:
         assert logger_name in log_manager._handlers_map[handler_name]["loggers"]
         assert log_manager._handlers_map[handler_name]["loggers"][logger_name]["level"] == config[0]['level'].upper()
 
-    def test_get_logger(self, log_manager, mock_logger, sample_logger_configs):
-        """Test retrieving an existing logger."""
+    def test_get_logger_added(self, log_manager, mock_logger, sample_logger_configs):
+        """Test retrieving a logger that was added."""
         logger_name = 'retrieval_test_logger'
-        config = sample_logger_configs['single_handler']
-        
+        config = sample_logger_configs['single_logger']
+
         # First add a logger
         log_manager.add_logger(logger_name, config)
         
@@ -288,18 +291,25 @@ class TestLoggerManagement:
         logger = log_manager.get_logger(logger_name)
         
         # Verify logger.bind() was called with correct name
-        mock_logger.bind.assert_called_with(logger_name=logger_name)
         assert logger is not None
-        
-        # Also test getting existing logger from config (logger_a exists in default config)
-        existing_logger = log_manager.get_logger('logger_a')
-        assert existing_logger is not None
+        mock_logger.bind.assert_called_with(logger_name=logger_name)
     
+    def test_get_logger_from_config(self, log_manager, mock_logger):
+        """Test retrieving a logger that exists in the default configuration."""
+        # Get the first logger name from the actual config (dynamic, not hardcoded)
+        logger_names = list(log_manager.config["loggers"].keys())
+        assert len(logger_names) > 0, "Config should have at least one logger defined"
+        
+        logger_name = logger_names[0]  # Get first logger from config
+        existing_logger = log_manager.get_logger(logger_name)
+        assert existing_logger is not None
+        mock_logger.bind.assert_called_with(logger_name=logger_name)
+
     def test_update_logger(self, log_manager, sample_logger_configs):
         """Test updating an existing logger."""
         logger_name = 'update_test_logger'
-        original_config = sample_logger_configs['single_handler']
-        updated_config = sample_logger_configs['multi_handler']
+        original_config = sample_logger_configs['single_logger']
+        updated_config = sample_logger_configs['multi_logger']
         
         # First add a logger
         log_manager.add_logger(logger_name, original_config)
@@ -309,13 +319,13 @@ class TestLoggerManagement:
         
         # Verify logger was updated
         assert log_manager._loggers_map[logger_name] == updated_config
-        assert len(log_manager._loggers_map[logger_name]) == 2
+        assert len(log_manager._loggers_map[logger_name]) == len(updated_config)
     
     def test_remove_logger(self, log_manager, sample_logger_configs):
         """Test removing an existing logger."""
         logger_name = 'remove_test_logger'
-        config = sample_logger_configs['single_handler']
-        
+        config = sample_logger_configs['single_logger']
+
         # First add a logger
         log_manager.add_logger(logger_name, config)
         
@@ -325,9 +335,9 @@ class TestLoggerManagement:
         # Verify logger was removed from internal mapping
         assert logger_name not in log_manager._loggers_map
     
-    def test_duplicate_logger_rejection(self, log_manager):
+    def test_duplicate_logger_rejection(self, log_manager, sample_logger_configs):
         """Test that duplicate logger names are rejected."""
-        config = [{'handler': 'handler_console', 'level': 'INFO'}]  # Correct dict format
+        config = sample_logger_configs['single_logger']
         log_manager.add_logger('duplicate', config)
         
         with pytest.raises(AssertionError, match="already exists"):
@@ -387,6 +397,16 @@ class TestNonexistentEntityOperations:
         
         PYTEST: Parametrized test efficiently covers multiple error scenarios.
         This ensures consistent error handling when entities don't exist.
+        
+        PYTHON *args EXPLANATION 🔍:
+        The *args unpacking operator takes a list and spreads it as separate arguments.
+        
+        Example with update_handler:
+        - args = ['nonexistent_handler', {'sink': 'test', 'format': 'simple', 'level': 'INFO'}]
+        - method(*args) becomes: method('nonexistent_handler', {'sink': 'test', 'format': 'simple', 'level': 'INFO'})
+        - This is equivalent to: log_manager.update_handler('nonexistent_handler', {'sink': 'test', 'format': 'simple', 'level': 'INFO'})
+        
+        Without *args, you'd have to write separate test methods for each operation!
         """
         method = getattr(log_manager, method_name)  # Get method by string name
         
@@ -398,9 +418,9 @@ class TestNonexistentEntityOperations:
         # This tests whether the system allows "forward references" to handlers
         logger_config = [{'handler': 'future_handler', 'level': 'INFO'}]
         
-        # This should be allowed - validation might happen at log-time, not config-time
-        log_manager.add_logger('forward_ref_logger', logger_config)
-        assert 'forward_ref_logger' in log_manager._loggers_map
+        # This should NOT be allowed - validation should happen at config-time to prevent silent failures
+        with pytest.raises(KeyError, match="does not exist"):
+            log_manager.add_logger('forward_ref_logger', logger_config)
 
 
 # ========================================================================================
@@ -505,11 +525,11 @@ class TestIntegrationScenarios:
         PYTEST: Integration test for error scenarios that might occur in production.
         """
         # Test adding logger with nonexistent handler reference
-        # (This should be allowed as "forward reference" - validation at log-time)
-        log_manager.add_logger('forward_ref_logger', [
-            {'handler': 'future_handler', 'level': 'INFO'}
-        ])
-        assert 'forward_ref_logger' in log_manager._loggers_map
+        # This should NOT be allowed - validation should prevent forward references
+        with pytest.raises(KeyError, match="future_handler"):
+            log_manager.add_logger('forward_ref_logger', [
+                {'handler': 'future_handler', 'level': 'INFO'}
+            ])
         
         # Test format reference vs custom format handling
         # Format reference (should look up in config)
