@@ -34,7 +34,7 @@ test = [
 packages = ["logmanager"]
 
 [tool.setuptools.package-dir]
-logmanager = "src/main"
+logmanager = "src/main/logger"
 
 [tool.setuptools.package-data]
 logmanager = ["*.yaml", "*.yml"]
