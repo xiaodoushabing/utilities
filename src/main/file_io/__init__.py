@@ -1,0 +1,112 @@
+import fsspec
+
+from ._base import BaseFileIO
+from ..aux import retry_args
+
+from upath import UPath
+from typing import Union, Literal, Optional, Any
+
+class FileIOInterface:
+    @staticmethod
+    def _instantiate(fpath: str, filesystem: Optional[str] = None, *args, **kwargs) -> BaseFileIO:
+        """
+        Instantiate a BaseFileIO object for the given file path and filesystem.
+        
+        Args:
+            fpath (str): File path to instantiate.
+            filesystem (Optional[str]): Filesystem type, if any.
+
+        Returns:
+            BaseFileIO: An instance of BaseFileIO or its subclass.
+        """
+        assert filesystem is None or filesystem in fsspec.available_protocols() # TODO
+        upath_obj: UPath = UPath(fpath, protocol=filesystem)
+        fileio: BaseFileIO = BaseFileIO(upath_obj=upath_obj, *args, **kwargs)
+        return fileio
+
+    @staticmethod
+    @retry_args
+    def finfo(fpath: str, filesystem: Optional[str] = None, *args, **kwargs) -> Union[dict, None]:
+        """
+        Get file information for the specified file path.
+        
+        Args:
+            fpath (str): File path to get information for.
+            filesystem (Optional[str]): Filesystem type, if any.
+
+        Returns:
+            Union[dict, None]: File information or None if not accessible.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=fpath, filesystem=filesystem, *args, **kwargs)
+        return fileio._finfo(*args, **kwargs)
+    
+    @staticmethod
+    @retry_args
+    def fread(read_path: str, filesystem: Optional[str] = None, *args, **kwargs) -> Any:
+        """
+        Read the content of a file at the specified path.
+        
+        Args:
+            read_path (str): Path to the file to read.
+            filesystem (Optional[str]): Filesystem type, if any.
+
+        Returns:
+            Any: Parsed file content.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=read_path, filesystem=filesystem, *args, **kwargs)
+        return fileio._fread(*args, **kwargs)
+    
+    @staticmethod
+    @retry_args
+    def fcopy(read_path: str, dest_path: str, filesystem: Optional[str] = None, *args, **kwargs) -> None:
+        """
+        Copy a file from one path to another.
+        
+        Args:
+            read_path (str): Path to the source file.
+            copy_path (str): Path to the destination file.
+            filesystem (Optional[str]): Filesystem type, if any.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=read_path, filesystem=filesystem, *args, **kwargs)
+        return fileio._copy(dest_path=dest_path, *args, **kwargs)
+    
+    @staticmethod
+    @retry_args
+    def fwrite(write_path: str, data: Any, filesystem: Optional[str] = None, *args, **kwargs) -> None:
+        """
+        Write data to a file at the specified path.
+        
+        Args:
+            write_path (str): Path to the file to write.
+            data (Any): Data to write to the file.
+            filesystem (Optional[str]): Filesystem type, if any.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=write_path, filesystem=filesystem, *args, **kwargs)
+        return fileio._fwrite(data=data, *args, **kwargs)
+    
+    @staticmethod
+    @retry_args
+    def fmakedirs(path: str, filesystem: Optional[str] = None, exist_ok: bool = True, *args, **kwargs) -> None:
+        """
+        Create directories at the specified path.
+        
+        Args:
+            path (str): Path to create directories at.
+            filesystem (Optional[str]): Filesystem type, if any.
+            exist_ok (bool): If True, do not raise an error if the directory already exists.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=path, filesystem=filesystem, *args, **kwargs)
+        return fileio._fmakedirs(dirpath=path, exist_ok=exist_ok, *args, **kwargs)
+    
+    @staticmethod
+    @retry_args
+    def fdelete(path: str, filesystem: Optional[str] = None, *args, **kwargs) -> None:
+        """
+        Delete the specified file or directory.
+        
+        Args:
+            path (str): Path to the file or directory to delete.
+            filesystem (Optional[str]): Filesystem type, if any.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=path, filesystem=filesystem, *args, **kwargs)
+        return fileio._fdelete(filepath=path, recursive=True, *args, **kwargs)
