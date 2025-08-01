@@ -4,7 +4,8 @@ from ._base import BaseFileIO
 from ..aux import retry_args
 
 from upath import UPath
-from typing import Union, Literal, Optional, Any
+from typing import Union, Optional, Any, overload
+from pandas import DataFrame
 
 class FileIOInterface:
     @staticmethod
@@ -71,6 +72,24 @@ class FileIOInterface:
         return fileio._copy(dest_path=dest_path, *args, **kwargs)
     
     @staticmethod
+    @overload
+    def fwrite(write_path: str, data: DataFrame, filesystem: Optional[str] = None, *args, **kwargs) -> None:
+        """Write DataFrame to CSV, Feather, Parquet, or Arrow file."""
+        ...
+    
+    @staticmethod
+    @overload
+    def fwrite(write_path: str, data: str, filesystem: Optional[str] = None, *args, **kwargs) -> None:
+        """Write string to text file."""
+        ...
+    
+    @staticmethod
+    @overload
+    def fwrite(write_path: str, data: Any, filesystem: Optional[str] = None, *args, **kwargs) -> None:
+        """Write any serializable data to JSON, YAML, or Pickle file."""
+        ...
+    
+    @staticmethod
     @retry_args
     def fwrite(write_path: str, data: Any, filesystem: Optional[str] = None, *args, **kwargs) -> None:
         """
@@ -78,8 +97,14 @@ class FileIOInterface:
         
         Args:
             write_path (str): Path to the file to write.
-            data (Any): Data to write to the file.
+            data (Any): Data to write to the file. Type must match file format:
+                - DataFrame: for .csv, .feather, .parquet, .arrow files
+                - str: for .txt/.text files
+                - Any serializable: for .json, .yaml/.yml, .pickle/.pkl files
             filesystem (Optional[str]): Filesystem type, if any.
+        
+        Raises:
+            TypeError: If data type doesn't match the expected type for the file format.
         """
         fileio: BaseFileIO = __class__._instantiate(fpath=write_path, filesystem=filesystem, *args, **kwargs)
         return fileio._fwrite(data=data, *args, **kwargs)

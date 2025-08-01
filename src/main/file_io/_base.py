@@ -40,6 +40,8 @@ class BaseFileIO:
             upath_obj (UPath): UPath object representing the file path.
         """
         self.upath = upath_obj
+        # Validate and cache the file extension during initialization
+        self.file_extension = self._validate_file_extension()
 
     def _finfo(self, *args, **kwargs) -> dict:
         """
@@ -51,6 +53,23 @@ class BaseFileIO:
             warnings.warn(f"{self.upath.path} does not exist or is not accessible.")
             raise e
         
+    def _validate_file_extension(self) -> str:
+        """
+        Validate and return the file extension.
+        
+        Returns:
+            str: The validated file extension (lowercase, without dot).
+            
+        Raises:
+            ValueError: If file has no extension or unsupported format.
+        """
+        file_extension = self.upath.suffix[1:].lower()
+        if not file_extension:
+            raise ValueError(f"File {self.upath.path} has no extension")
+        if file_extension not in fileio_mapping:
+            raise ValueError(f"Unsupported file format: .{file_extension}. Supported formats: {list(fileio_mapping.keys())}")
+        return file_extension
+
     def _fread(self, *args, **kwargs) -> object:
         """
         Read the file content.
@@ -58,10 +77,14 @@ class BaseFileIO:
         Returns:
             object: Parsed file content.
         """
+        # Check if file exists
+        if not self.upath.exists():
+            raise FileNotFoundError(f"File not found: {self.upath.path}")
+        
         with self.upath.fs.open(self.upath.path, 'rb') as f:
             data: BytesIO = BytesIO(f.read(*args, **kwargs))
         
-        file_io_cls = fileio_mapping[self.upath.suffix[1:]]
+        file_io_cls = fileio_mapping[self.file_extension]
         return file_io_cls._read(data)
     
     def _copy(self, dest_path: str, *args, **kwargs) -> None:
@@ -71,6 +94,14 @@ class BaseFileIO:
         Args:
             dest_path (str): Destination path for the copied file.
         """
+        # Check if source file exists
+        if not self.upath.exists():
+            raise FileNotFoundError(f"Source file not found: {self.upath.path}")
+            
+        # Validate destination path
+        if not dest_path or not dest_path.strip():
+            raise ValueError("Destination path cannot be empty")
+            
         try:
             dest_upath: UPath = UPath(dest_path)
             with self.upath.fs.open(self.upath.path, 'rb') as src_file, dest_upath.fs.open(dest_upath.path, 'wb') as dest_file:
@@ -88,8 +119,34 @@ class BaseFileIO:
             data (object): Data to write to the file.
             mode (Literal['wb', 'w']): Mode to open the file, either 'wb' for binary or 'w' for text.
         """
-        file_io_cls = fileio_mapping[self.upath.suffix[1:]]
+        self._validate_data_type(data, self.file_extension)
+        
+        file_io_cls = fileio_mapping[self.file_extension]
         return file_io_cls._write(self.upath, data, mode, *args, **kwargs)
+    
+    def _validate_data_type(self, data: object, file_extension: str) -> None:
+        """
+        Validate that the data type is appropriate for the file format.
+        
+        Args:
+            data: The data to validate
+            file_extension: The file extension to check against
+        """
+        from pandas import DataFrame
+        
+        # Define required types for each format
+        dataframe_formats = {'csv', 'feather', 'parquet', 'arrow'}
+        text_formats = {'txt', 'text'}
+        
+        # JSON and YAML can accept various serializable types, so we don't restrict them
+        # Pickle can accept any object, so no validation needed
+        if file_extension in dataframe_formats:
+            if not isinstance(data, DataFrame):
+                raise TypeError(f"Writing {file_extension.upper()} files requires a pandas DataFrame, got {type(data).__name__}")
+        
+        elif file_extension in text_formats:
+            if not isinstance(data, str):
+                raise TypeError(f"Writing {file_extension.upper()} files requires a string, got {type(data).__name__}")
     
     def _fmakedirs(self, dirpath: str, exist_ok: bool = True, *args, **kwargs) -> None:
         """
@@ -114,10 +171,20 @@ class BaseFileIO:
 
         Args:
             filepath (str): Path to the file or directory to delete.
-            
+
         Raises:
             OSError: If the file or directory cannot be deleted.
         """
+        # Validate filepath
+        if not filepath or not filepath.strip():
+            raise ValueError("File path cannot be empty")
+            
+        # Check if file/directory exists
+        delete_upath = UPath(filepath)
+        if not delete_upath.exists():
+            warnings.warn(f"Path does not exist: {filepath}")
+            return  # Don't raise error for non-existent files
+            
         try:
             self.upath.fs.delete(filepath, *args, **kwargs)
         except OSError as e:
