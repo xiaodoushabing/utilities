@@ -28,7 +28,7 @@ def main():
     # logger_main.success("This is a success message from default_task.")
 
     #################################### WITH CONFIG FILE ####################################
-    config_file = "./src/main/example_config.yaml"
+    config_file = "./src/main/logger/example_config.yaml"
     lm = LogManager(config_path=config_file)
 
     # Get loggers

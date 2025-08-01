@@ -146,7 +146,11 @@ class LogManager:
                 Use update_handler() to modify existing handlers.
         """
         assert handler_name not in self._handlers_map, f"Handler {handler_name} already exists. Please use update_handler to modify it."
-        self._handlers_map[handler_name] = {}
+        # Validate required keys first
+        assert "level" in handler_conf, f"Handler {handler_name} must have a 'level' key. Please define a level for the handler in the config file."
+        # Store handler's base level before modifying config
+        handler_base_level = handler_conf["level"].upper()
+        self._handlers_map[handler_name]["base_level"] = handler_base_level
         # modify handler config
         handler_conf = self._modify_handler_conf(handler_name, handler_conf, self.config.get("formats", {}))
         # add handler and update handlers map
@@ -165,10 +169,15 @@ class LogManager:
                 Use add_handler() to create new handlers.
         """
         assert handler_name in self._handlers_map, f"Handler {handler_name} does not exist. Please use add_handler to create it."
+        # Validate required keys first
+        assert "level" in handler_conf, f"Handler {handler_name} must have a 'level' key. Please define a level for the handler in the config file."
         # get current handler info
         old_handler_id = self._handlers_map[handler_name]["id"]
         # remove old handler
         logger.remove(old_handler_id)
+        # store new handler's base level before modifying config
+        handler_base_level = handler_conf["level"].upper()
+        self._handlers_map[handler_name]["base_level"] = handler_base_level
         # modify handler_config if needed
         handler_conf = self._modify_handler_conf(handler_name, handler_conf, self.config.get("formats", {}))
         # add new handler and get new handler id
@@ -276,11 +285,14 @@ class LogManager:
         """
         Create a filter function for the handler based on the logger mappings.
 
-        The returned filter function can be used to determine whether a log
-        record should be processed by the handler. It checks if the logger name
-        is in the handler's loggers mapping and if the log level of the record
-        is greater than or equal to the level specified for that logger in the 
-        handler's mapping.
+        The returned filter function implements the design where the effective threshold
+        is the maximum of the handler's base level and the logger's level. This ensures
+        that a handler's base level acts as a minimum threshold that cannot be bypassed.
+
+        Design Logic:
+        - Handler ERROR, Logger DEBUG → Threshold = max(ERROR, DEBUG) = ERROR
+        - Handler DEBUG, Logger INFO → Threshold = max(DEBUG, INFO) = INFO
+        - Handler INFO, Logger WARNING → Threshold = max(INFO, WARNING) = WARNING
 
         Args:
             handler_name (str): The name of the handler for which to create the filter.
@@ -292,11 +304,21 @@ class LogManager:
 
         def filter_func(record):
             logger_name = record["extra"].get("logger_name")
-            level = record["level"].no
-            if (logger_name in self._handlers_map[handler_name].get("loggers", {}) and
-                level >= logger.level(self._handlers_map[handler_name]["loggers"][logger_name]["level"]).no):
-                return True
-            return False
+            record_level = record["level"].no
+            
+            # Check if this logger is configured for this handler
+            if logger_name not in self._handlers_map[handler_name].get("loggers", {}):
+                return False
+            
+            # Get handler's base level and logger's specific level
+            handler_base_level = logger.level(self._handlers_map[handler_name]["base_level"]).no
+            logger_level = logger.level(self._handlers_map[handler_name]["loggers"][logger_name]["level"]).no
+            
+            # Effective threshold is the maximum of handler base level and logger level
+            effective_threshold = max(handler_base_level, logger_level)
+            
+            return record_level >= effective_threshold
+        
         return filter_func
 
     ## ------------------------------ LOGGER MANAGEMENT ------------------------------ ##

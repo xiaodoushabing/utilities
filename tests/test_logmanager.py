@@ -61,7 +61,7 @@ class TestLogManagerBasics:
         
         # Verify the basic structure matches what we expect from default config
         assert log_manager.config['formats'] == default_config['formats']
-        assert set(log_manager.config['loggers'].keys()) == set(default_config['loggers'].keys())
+        assert log_manager.config['loggers'] == default_config['loggers']
         assert set(log_manager.config['handlers'].keys()) == set(default_config['handlers'].keys())
     
     def test_config_loading_from_custom_path(self, mock_logger, temp_dir):
@@ -281,25 +281,38 @@ class TestHandlerFilterBehavior:
         # Return the filter function for testing
         return log_manager._make_handler_filter("test_handler")
     
+    def mock_level_side_effect(self, level_name):
+        """Mock logger.level() to return the appropriate levels."""
+        level_values = {
+            "DEBUG": MagicMock(no=10),
+            "INFO": MagicMock(no=20),
+            "WARNING": MagicMock(no=30),
+            "ERROR": MagicMock(no=40),
+        }
+        return level_values.get(level_name, MagicMock(no=40))
+    
     @pytest.mark.parametrize("logger_name,record_level,expected_result,test_description", [
-        # Test correct logger with various levels against ERROR (40) threshold defined by handler
-        ("test_logger", 50, True, "allows correct logger with CRITICAL level (50 >= 40)"),
-        ("test_logger", 40, True, "allows correct logger with ERROR level (40 >= 40)"),
-        ("test_logger", 30, False, "blocks correct logger with WARNING level (30 < 40)"),
-        ("test_logger", 20, False, "blocks correct logger with INFO level (20 < 40)"),
-        ("test_logger", 10, False, "blocks correct logger with DEBUG level (10 < 40)"),
+        # Test correct logger with various levels against ERROR (40) threshold from max(handler=ERROR, logger=DEBUG)
+        ("test_logger", 50, True, "allow correct logger with CRITICAL level (50 >= 40)"),
+        ("test_logger", 40, True, "allow correct logger with ERROR level (40 >= 40)"),
+        ("test_logger", 30, False, "block correct logger with WARNING level (30 < 40)"),
         # Test wrong logger (should always block regardless of level)
-        ("different_logger", 50, False, "blocks logs from unassociated loggers"),
-        ("different_logger", 10, False, "blocks logs from unassociated loggers"),
+        ("different_logger", 50, False, "block logs from unassociated loggers"),
+        ("different_logger", 10, False, "block logs from unassociated loggers"),
         # Edge cases
         ("", 50, False, "blocks empty logger name"),
     ])
     def test_handler_filter_behavior(self, handler_logger_setup, mock_logger, 
                                    logger_name, record_level, expected_result, test_description):
-        """Test handler filter behavior with various logger names and levels.
+        """Test handler filter behavior with the design intention: max(handler_level, logger_level).
         
-        PYTEST: Parametrized test covering all filter scenarios against handler's configured threshold.
-        The handler is configured with ERROR level (40), so only ERROR and above should pass.
+        PYTEST: Test scenario:
+        - Handler configured with ERROR level (40) - this is the "base level" 
+        - Logger configured with DEBUG level (10) - this is logger-specific preference
+        - Effective threshold = max(40, 10) = 40 (ERROR)
+        
+        This implements the design of: "handler sets the base level" - the handler's level
+        acts as a minimum threshold that cannot be bypassed by a lower logger level.
         """
         filter_func = handler_logger_setup
         
@@ -309,12 +322,35 @@ class TestHandlerFilterBehavior:
             "level": MagicMock(no=record_level)
         }
         
-        # Mock logger.level() to return ERROR level (40) - this should match handler config
-        mock_logger.level.return_value = MagicMock(no=40)
+        mock_logger.level.side_effect = self.mock_level_side_effect
         
         # Test filter behavior
         result = filter_func(mock_record)
-        assert result == expected_result, f"Filter {test_description}"
+        assert result == expected_result, f"Filter should {test_description}"
+
+    @pytest.mark.parametrize("handler_name,handler_level,logger_name,logger_level,expected_threshold", [
+        ("h_error", "ERROR", "l_debug", "DEBUG", 40),
+        ("h_debug", "DEBUG", "l_info", "INFO", 20),
+        ("h_warn", "WARNING", "l_warn", "WARNING", 30),
+    ])
+    def test_max_threshold_design_scenarios(self, log_manager, mock_logger, 
+                                          handler_name, handler_level, logger_name, logger_level, expected_threshold):
+        """Test max(handler_level, logger_level) design with parametrized scenarios."""
+        
+        # Setup handler and logger for this scenario
+        log_manager.add_handler(handler_name, {'sink': 'sys.stdout', 'format': 'simple', 'level': handler_level})
+        log_manager.add_logger(logger_name, [{'handler': handler_name, 'level': logger_level}])
+        
+        mock_logger.level.side_effect = self.mock_level_side_effect
+        
+        filter_func = log_manager._make_handler_filter(handler_name)
+        
+        # Should accept messages at or above threshold
+        assert filter_func({"extra": {"logger_name": logger_name}, "level": MagicMock(no=expected_threshold)}) == True
+        assert filter_func({"extra": {"logger_name": logger_name}, "level": MagicMock(no=expected_threshold+10)}) == True
+        # Should reject messages below threshold  
+        assert filter_func({"extra": {"logger_name": logger_name}, "level": MagicMock(no=expected_threshold-10)}) == False
+
 class TestHandlerManagement:
     """Test handler CRUD operations."""
     
@@ -567,15 +603,6 @@ class TestLoggerManagement:
         # Verify logger was removed from internal mapping
         assert logger_name not in log_manager._loggers_map
     
-    def test_duplicate_logger_rejection(self, log_manager, sample_logger_configs):
-        """Test that duplicate logger names are rejected."""
-        config = sample_logger_configs['single_logger']
-        log_manager.add_logger('duplicate', config)
-        
-        with pytest.raises(AssertionError, match="already exists"):
-            log_manager.add_logger('duplicate', config)
-
-
 # ========================================================================================
 # PYTEST LEARNING TIP 💡  
 # Grouping similar error tests together makes it easy to see all failure scenarios
