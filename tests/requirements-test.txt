@@ -1,9 +1,0 @@
-# Testing dependencies for LogManager
-pytest>=7.0.0
-pytest-cov>=4.0.0
-pytest-mock>=3.10.0
-coverage>=7.0.0
-
-# Optional but recommended
-pytest-xdist>=3.0.0  # For parallel test execution
-pytest-html>=3.0.0   # For HTML test reports
