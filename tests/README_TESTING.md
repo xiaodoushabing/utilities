@@ -34,11 +34,12 @@ Your one-stop resource for testing workflows, troubleshooting, and practical tip
 
 ## 📁 Test Files Overview
 
-| File | Purpose | When to Use |
+| File/Directory | Purpose | When to Use |
 |------|---------|-------------|
 | `test_logmanager.py` | 🟢 **Unit Tests** - Fast, isolated component testing | Daily development and debugging |
 | `test_logmanager_integration.py` | 🟡 **Integration Tests** - Complex workflow testing | Before commits and releases |
 | `test_logger.py` | 🟢 Original usage examples | Comparing manual vs automated testing |
+| `fileio/` | 📁 **FileIO Tests** - File operations and data I/O testing | Testing file handling components |
 | `conftest.py` | **Shared fixtures** and test configuration | Understanding pytest setup |
 
 ## 🏷️ Test Categories & Markers
@@ -88,10 +89,13 @@ pytest -m unit -x  # Stop on first failure
 # 2. Run specific test for feature you're working on
 pytest -k "test_add_handler" -v
 
-# 3. Run integration tests before committing
+# 3. Run FileIO tests when working on file operations
+pytest tests/fileio/ -v
+
+# 4. Run integration tests before committing
 pytest -m integration -v
 
-# 4. Run full suite with coverage before pushing
+# 5. Run full suite with coverage before pushing
 pytest --cov=src --cov-report=term-missing
 ```
 
