@@ -11,12 +11,14 @@ from .json import JsonFileIO
 from .parquet import ParquetFileIO
 from .pickle import PickleFileIO
 from .text import TextFileIO
+from .sql import SQLFileIO
 from .yaml import YamlFileIO
 
 fileio_mapping = {
     "csv": CSVFileIO,
     "txt": TextFileIO,
     "text": TextFileIO,
+    "sql": SQLFileIO,
     "json": JsonFileIO,
     "yaml": YamlFileIO,
     "yml": YamlFileIO,
@@ -48,7 +50,7 @@ class BaseFileIO:
         Get file information.
         """
         try:
-            return self.upath.fs.finfo(self.upath.path, *args, **kwargs)
+            return self.upath.fs.info(self.upath.path, *args, **kwargs)
         except OSError as e:
             warnings.warn(f"{self.upath.path} does not exist or is not accessible.")
             raise e
@@ -111,7 +113,7 @@ class BaseFileIO:
             warnings.warn(f"Failed to copy {self.upath.path} to {dest_path}: {e}")
             raise e
 
-    def _fwrite(self, data: object, mode: str="wb", *args, **kwargs) -> None:
+    def _fwrite(self, data: object, *args, **kwargs) -> None:
         """
         Write data to the file.
         
@@ -122,7 +124,7 @@ class BaseFileIO:
         self._validate_data_type(data, self.file_extension)
         
         file_io_cls = fileio_mapping[self.file_extension]
-        return file_io_cls._write(self.upath, data, mode, *args, **kwargs)
+        return file_io_cls._write(self.upath, data, *args, **kwargs)
     
     def _validate_data_type(self, data: object, file_extension: str) -> None:
         """
@@ -136,7 +138,9 @@ class BaseFileIO:
         
         # Define required types for each format
         dataframe_formats = {'csv', 'feather', 'parquet', 'arrow'}
-        text_formats = {'txt', 'text'}
+        str_formats = {'txt', 'text', 'sql'}
+        serializable_formats = {'json', 'yaml', 'yml', 'pickle', 'pkl'}
+
         
         # JSON and YAML can accept various serializable types, so we don't restrict them
         # Pickle can accept any object, so no validation needed
@@ -144,10 +148,13 @@ class BaseFileIO:
             if not isinstance(data, DataFrame):
                 raise TypeError(f"Writing {file_extension.upper()} files requires a pandas DataFrame, got {type(data).__name__}")
         
-        elif file_extension in text_formats:
+        elif file_extension in str_formats:
             if not isinstance(data, str):
                 raise TypeError(f"Writing {file_extension.upper()} files requires a string, got {type(data).__name__}")
-    
+        
+        elif file_extension in serializable_formats:
+            pass  # JSON, YAML, and Pickle can handle various serializable types
+        
     def _fmakedirs(self, dirpath: str, exist_ok: bool = True, *args, **kwargs) -> None:
         """
         Create directories for the file path recursively.
