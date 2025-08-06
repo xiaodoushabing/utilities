@@ -78,13 +78,13 @@ class LogManager:
         self.config = {}
         self._setup_logger()
 
-        # teardown
-        atexit.register(self._cleanup)
-        
         # HDFS copy management
         self._hdfs_copy_threads = {}  # thread_name -> thread object
         self._stop_events = {}        # thread_name -> threading.Event
 
+        # teardown
+        atexit.register(self._cleanup)
+        
     ## ------------------------------ SETUP LOGGER ------------------------------ ##
     def _setup_logger(self):
         """
@@ -436,16 +436,16 @@ class LogManager:
         for _handler in handlers:
             handler_name = _handler["handler"]
             if handler_name in self._handlers_map:
-                self._handlers_map[handler_name]["loggers"].pop(logger_name)
+                self._handlers_map[handler_name]["loggers"].pop(logger_name, None)
 
     ## ------------------------------ HDFS COPY MANAGEMENT ------------------------------ ##
     def start_hdfs_copy(
         self,
         copy_name: str,
-        local_pattern: Union[str, List[str]],
+        path_patterns: List[str],
         hdfs_destination: str,
+        root_dir: Optional[str] = None,
         copy_interval: int = 60,
-        filesystem: Optional[str] = "hdfs",
         create_dest_dirs: bool = True,
         preserve_structure: bool = True,
         max_retries: int = 3,
@@ -456,17 +456,18 @@ class LogManager:
         
         Args:
             copy_name (str): Unique name for this copy operation (used for thread identification).
-            local_pattern (Union[str, List[str]]): Glob pattern(s) or file path(s) to match local files.
+            path_patterns (List[str]): Glob pattern(s) or file path(s) to match local files.
                 Examples: 
-                - "/path/to/logs/*.log"
+                - ["/path/to/logs/*.log"]
                 - ["/path/to/logs/*.log", "/path/to/logs/*.txt"]
-                - "/path/to/specific/file.log"
+                - ["/path/to/specific/file.log"]
             hdfs_destination (str): HDFS destination directory path.
                 Example: "hdfs://namenode:port/path/to/hdfs/logs/"
+            root_dir (Optional[str]): Root directory for the local files.
             copy_interval (int): Interval in seconds between copy operations. Default is 60 seconds.
-            filesystem (Optional[str]): Filesystem type for HDFS. Default is "hdfs".
             create_dest_dirs (bool): Whether to create destination directories if they don't exist.
             preserve_structure (bool): Whether to preserve local directory structure in HDFS.
+                If True, root_dir must be specified.
                 If True: "/local/logs/app/file.log" -> "hdfs://dest/app/file.log"
                 If False: "/local/logs/app/file.log" -> "hdfs://dest/file.log"
             max_retries (int): Maximum number of retry attempts for failed copies. Default is 3.
@@ -479,7 +480,7 @@ class LogManager:
             # Copy all .log files every 2 minutes
             log_manager.start_hdfs_copy(
                 copy_name="app_logs",
-                local_pattern="/tmp/logs/*.log",
+                path_patterns="/tmp/logs/*.log",
                 hdfs_destination="hdfs://namenode:9000/logs/app/",
                 copy_interval=120
             )
@@ -501,22 +502,18 @@ class LogManager:
             6. Thread safety: Multiple copy operations run in separate threads.
                Each operation is independent and won't interfere with Python logging.
         """
+
+        # Validate parameters
+        if not copy_name:
+            raise ValueError("copy_name cannot be empty")
         if copy_name in self._hdfs_copy_threads:
             raise ValueError(f"HDFS copy operation '{copy_name}' already exists. Use stop_hdfs_copy() first.")
-        
-        # Validate parameters
-        if not local_pattern:
-            raise ValueError("local_pattern cannot be empty")
+        if not path_patterns:
+            raise ValueError("path_patterns cannot be empty")
         if not hdfs_destination:
             raise ValueError("hdfs_destination cannot be empty")
         if copy_interval <= 0:
             raise ValueError("copy_interval must be positive")
-        
-        # Normalize patterns to list
-        if isinstance(local_pattern, str):
-            patterns = [local_pattern]
-        else:
-            patterns = list(local_pattern)
         
         # Create stop event for this copy operation
         stop_event = threading.Event()
@@ -526,9 +523,16 @@ class LogManager:
         copy_thread = threading.Thread(
             target=self._hdfs_copy_worker,
             args=(
-                copy_name, patterns, hdfs_destination, copy_interval,
-                filesystem, create_dest_dirs, preserve_structure,
-                max_retries, retry_delay, stop_event
+                copy_name,
+                path_patterns,
+                hdfs_destination,
+                copy_interval,
+                create_dest_dirs,
+                preserve_structure,
+                root_dir,
+                max_retries,
+                retry_delay,
+                stop_event
             ),
             daemon=True,
             name=f"HDFSCopy-{copy_name}"
@@ -537,7 +541,7 @@ class LogManager:
         self._hdfs_copy_threads[copy_name] = copy_thread
         copy_thread.start()
         
-        print(f"Started HDFS copy operation '{copy_name}' with {copy_interval}s interval")
+        print(f"Started HDFS copy operation '{copy_name}' with {copy_interval}s interval.\n")
 
     def stop_hdfs_copy(self, copy_name: str, timeout: float = 10.0) -> bool:
         """
@@ -564,10 +568,12 @@ class LogManager:
         
         # Check if thread actually stopped
         if self._hdfs_copy_threads[copy_name].is_alive():
-            print(f"Warning: HDFS copy thread '{copy_name}' did not stop within {timeout}s")
+            print(
+                f"Warning: HDFS copy thread '{copy_name}' did not stop within {timeout}s.\n"
+                f"Consider increasing the timeout or checking the thread manually."
+            )
             return False
         
-        # Clean up
         del self._hdfs_copy_threads[copy_name]
         del self._stop_events[copy_name]
         
@@ -591,9 +597,9 @@ class LogManager:
             try:
                 if not self.stop_hdfs_copy(copy_name, timeout):
                     failed_to_stop.append(copy_name)
-            except ValueError:
-                # Already stopped or doesn't exist
-                pass
+            except ValueError as e:
+                print(f"Error stopping HDFS copy operation '{copy_name}': {e}")
+                failed_to_stop.append(copy_name)
         
         return failed_to_stop
 
@@ -617,105 +623,123 @@ class LogManager:
     def _hdfs_copy_worker(
         self,
         copy_name: str,
-        patterns: List[str],
+        path_patterns: List[str],
         hdfs_destination: str,
         copy_interval: int,
-        filesystem: str,
         create_dest_dirs: bool,
         preserve_structure: bool,
+        root_dir: Optional[str],
         max_retries: int,
         retry_delay: int,
         stop_event: threading.Event
     ) -> None:
         """
         Worker function that runs in a separate thread to perform periodic HDFS copying.
-        
-        This is an internal method that should not be called directly.
         """
-        print(f"HDFS copy worker '{copy_name}' started")
-        
+        print(f"HDFS copy worker '{copy_name}' started.")
+
         while not stop_event.is_set():
             try:
-                # Find files matching patterns
-                files_to_copy = []
-                for pattern in patterns:
-                    if os.path.isfile(pattern):
-                        # Direct file path
-                        files_to_copy.append(pattern)
-                    else:
-                        # Glob pattern
-                        matched_files = glob.glob(pattern, recursive=True)
-                        files_to_copy.extend(matched_files)
-                
-                # Remove duplicates and filter only files
-                files_to_copy = list(set([f for f in files_to_copy if os.path.isfile(f)]))
+                # Find files matching the provided patterns (inside loop for dynamic discovery)
+                files_to_copy = self._discover_files_to_copy(path_patterns)
                 
                 if files_to_copy:
+                    print(f"HDFS copy worker '{copy_name}' found {len(files_to_copy)} files to copy.")
                     self._copy_files_to_hdfs(
-                        files_to_copy, hdfs_destination, filesystem,
-                        create_dest_dirs, preserve_structure, max_retries, retry_delay
+                        files_to_copy,
+                        hdfs_destination,
+                        create_dest_dirs,
+                        preserve_structure,
+                        root_dir,
+                        max_retries,
+                        retry_delay
                     )
                 else:
-                    print(f"HDFS copy '{copy_name}': No files found matching patterns {patterns}")
-                
+                    print(
+                        f"HDFS copy worker '{copy_name}': No files found matching patterns {path_patterns}"
+                        f"No files copied in this interval."
+                    )
+                    
             except Exception as e:
                 print(f"Error in HDFS copy worker '{copy_name}': {e}")
             
             # Wait for the next interval or stop signal
             if stop_event.wait(timeout=copy_interval):
-                break  # Stop event was set
-        
+                break
+
         print(f"HDFS copy worker '{copy_name}' stopped")
+
+    def _discover_files_to_copy(self, path_patterns: List[str]) -> List[str]:
+        """
+        Discover files matching the provided patterns.
+        
+        Args:
+            path_patterns (List[str]): List of file paths or glob patterns.
+            
+        Returns:
+            List[str]: List of unique file paths that exist.
+        """
+        files_to_copy = []
+        
+        for pattern in path_patterns:
+            if os.path.isfile(pattern):
+                files_to_copy.append(pattern)
+            else:
+                try:
+                    matched_files = glob.glob(pattern, recursive=True)
+                    files_to_copy.extend([f for f in matched_files if os.path.isfile(f)])
+                except (OSError, ValueError) as e:
+                    print(f"Warning: Invalid pattern '{pattern}': {e}")
+        
+        return list(set(files_to_copy))
 
     def _copy_files_to_hdfs(
         self,
         local_files: List[str],
         hdfs_destination: str,
-        filesystem: str,
         create_dest_dirs: bool,
         preserve_structure: bool,
+        root_dir: Optional[str],
         max_retries: int,
         retry_delay: int
     ) -> None:
         """
         Copy a list of local files to HDFS destination.
-        
-        This is an internal method that handles the actual file copying logic.
         """
         success_count = 0
         error_count = 0
         
         for local_file in local_files:
+            if preserve_structure:
+                if not root_dir:
+                    raise ValueError(
+                        "'root_dir' must be specified when 'preserve_structure' is True"
+                        " This is required to maintain the directory structure in HDFS."
+                    )
+                rel_path = os.path.relpath(local_file, root_dir)
+                dest_path = os.path.join(hdfs_destination, rel_path).replace("\\", "/")
+            else:
+                filename = os.path.basename(local_file)
+                dest_path = os.path.join(hdfs_destination, filename).replace("\\", "/")
+            
+            if create_dest_dirs:
+                dest_dir = os.path.dirname(dest_path)
+                try:
+                    FileIOInterface.fmakedirs(dest_dir, exist_ok=True)
+                except Exception as e:
+                    print(f"Warning: Could not create directory {dest_dir}: {e}")
+
             for attempt in range(max_retries + 1):
                 try:
-                    # Determine destination path
-                    if preserve_structure:
-                        # Preserve directory structure
-                        rel_path = os.path.basename(local_file)
-                        dest_path = os.path.join(hdfs_destination, rel_path).replace("\\", "/")
-                    else:
-                        # Flatten structure
-                        filename = os.path.basename(local_file)
-                        dest_path = os.path.join(hdfs_destination, filename).replace("\\", "/")
-                    
-                    # Create destination directory if needed
-                    if create_dest_dirs:
-                        dest_dir = os.path.dirname(dest_path)
-                        try:
-                            FileIOInterface.fmakedirs(dest_dir, filesystem=filesystem, exist_ok=True)
-                        except Exception as mkdir_error:
-                            print(f"Warning: Could not create directory {dest_dir}: {mkdir_error}")
-                    
                     # Copy file using FileIO interface
                     FileIOInterface.fcopy(
                         read_path=local_file,
                         dest_path=dest_path,
-                        filesystem=filesystem
                     )
                     
                     success_count += 1
                     print(f"Successfully copied {local_file} -> {dest_path}")
-                    break  # Success, exit retry loop
+                    break
                     
                 except Exception as e:
                     if attempt < max_retries:
@@ -738,10 +762,13 @@ class LogManager:
         mapping dictionaries. It also stops all HDFS copy operations.
         """
         # Stop all HDFS copy operations
-        failed_to_stop = self.stop_all_hdfs_copy(timeout=5.0)
+        failed_to_stop = self.stop_all_hdfs_copy()
         if failed_to_stop:
-            print(f"Warning: Some HDFS copy operations did not stop cleanly: {failed_to_stop}")
-        
+            print(
+                f"Warning: Some HDFS copy operations did not stop cleanly: {failed_to_stop}\n"
+                f"Please check the threads manually."
+            )
+
         logger.remove()
         self._handlers_map.clear()
         self._loggers_map.clear()
