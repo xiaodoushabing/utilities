@@ -40,6 +40,7 @@ def temp_dir():
 # MOCK LOGGER FIXTURES
 # ========================================================================================
 
+
 @pytest.fixture
 def mock_logger():
     """
@@ -140,6 +141,30 @@ def log_manager(mock_logger, default_config):
 # ========================================================================================
 
 @pytest.fixture
+def hdfs_copy_defaults():
+    """
+    📦 Default parameters for HDFS copy testing.
+    
+    Provides a complete set of valid default parameters that can be 
+    merged with test-specific invalid parameters to test validation.
+    
+    Usage: 
+        params = {**hdfs_copy_defaults, **invalid_params}
+        log_manager.start_hdfs_copy(**params)
+    """
+    return {
+        "copy_name": "test",
+        "path_patterns": ["/tmp/*_log.txt"],
+        "hdfs_destination": "hdfs://dest/",
+        "root_dir": None,
+        "copy_interval": 60,
+        "create_dest_dirs": True,
+        "preserve_structure": False,
+        "max_retries": 3,
+        "retry_delay": 5,
+    }
+
+@pytest.fixture
 def sample_log_files(temp_dir):
     """
     Create sample log files for HDFS copy testing.
@@ -156,3 +181,33 @@ def sample_log_files(temp_dir):
             f.write(f"Log content for file {i}")
         files.append(str(file_path))
     return files
+
+@pytest.fixture
+def mock_thread():
+    """
+    Creates a mock thread for testing threading functionality.
+    
+    - Replaces real threading.Thread with controllable mock
+    - Pre-configured with realistic behavior
+    - Allows verification of thread creation and method calls
+    
+    Usage: def test_something(mock_thread):
+           mock_thread.start.assert_called_once()
+           mock_thread.join.assert_called_once()
+    """
+    with patch('utilities.logger.threading.Thread') as mock_thread:
+        mock_thread_instance = MagicMock()
+        mock_thread_instance.name = "MockThread"
+        mock_thread_instance.daemon = True
+        mock_thread_instance.is_alive.return_value = True
+        
+        def mock_join(timeout=None):
+            mock_thread_instance.is_alive.return_value = False
+            return None
+        
+        mock_thread_instance.join.side_effect = mock_join
+        
+        mock_thread.return_value = mock_thread_instance
+        
+        yield mock_thread
+
