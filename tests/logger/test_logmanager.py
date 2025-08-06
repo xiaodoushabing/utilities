@@ -21,7 +21,7 @@ import sys
 import yaml
 from unittest.mock import patch, MagicMock
 
-from logmanager import LogManager
+from utilities import LogManager
 
 pytestmark = pytest.mark.unit
 

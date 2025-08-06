@@ -17,12 +17,14 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "loguru>=0.6.0",
+    "tenacity>=9.0.0",
+    "loguru>=0.7.3",
     "pendulum>=2.0.0",
     "PyYAML>=6.0",
-    "upath>=1.0.*",
-    "fsspec",
+    "fsspec>=2025.0.0",
     "pandas>=1.5.0",
+    "universal_pathlib>=0.2",
+    "numpy"
 ]
 
 [project.optional-dependencies]
@@ -34,18 +36,15 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["logmanager"]
+packages = ["utilities"]
 
 [tool.setuptools.package-dir]
-logmanager = "src/main/logger"
-
-[tool.setuptools.package-data]
-logmanager = ["*.yaml", "*.yml"]
+utilities = "src/main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--verbose --cov=src --maxfail=2 -ra"
 markers = [
-    "unit: marks tests as unit tests (fast, isolated tests for individual components)",
-    "integration: marks tests as integration tests (slower tests that verify multiple components work together)",
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
 ]

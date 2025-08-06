@@ -1,4 +1,4 @@
-from pandas import DataFrame, read_parquet, to_parquet
+from pandas import DataFrame, read_parquet
 from io import BytesIO
 from upath import UPath
 

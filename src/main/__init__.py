@@ -5,6 +5,10 @@ This package provides task-aware logging with shared handlers across tasks,
 designed as a single logger instance throughout the application lifecycle.
 """
 
-from .main.logger import LogManager
+from .logger import LogManager
+from .file_io import FileIOInterface as FileIO
 
-__all__ = ["LogManager"]
+__all__ = [
+    "LogManager",
+    "FileIO"
+]

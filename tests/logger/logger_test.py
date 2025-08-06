@@ -1,5 +1,5 @@
 
-from logmanager import LogManager
+from utilities import LogManager
 from loguru import logger
 
 def main():

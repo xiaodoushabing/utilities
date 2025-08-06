@@ -1,7 +1,7 @@
 import fsspec
 
 from ._base import BaseFileIO
-from ..aux import retry_args
+from .._aux import retry_args
 
 from upath import UPath
 from typing import Union, Optional, Any, overload
