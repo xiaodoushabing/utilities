@@ -10,6 +10,7 @@ import pytest
 import tempfile
 import yaml
 import shutil
+from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
 from utilities import LogManager
@@ -22,7 +23,7 @@ from utilities import LogManager
 @pytest.fixture
 def temp_dir():
     """
-    🗂️ Creates a temporary folder for testing.
+     Creates a temporary folder for testing.
     
     - Auto-cleanup after test completes
     - Safe place for test files
@@ -30,9 +31,9 @@ def temp_dir():
     Usage: def test_something(temp_dir):
            file_path = os.path.join(temp_dir, 'test.txt')
     """
-    temp_path = tempfile.mkdtemp()                  # 📁 Create the temporary directory
-    yield temp_path                                 # 🎁 Give the path to your test
-    shutil.rmtree(temp_path, ignore_errors=True)    # 🧹 Clean up after test completes
+    temp_path = tempfile.mkdtemp()                  # Create the temporary directory
+    yield temp_path                                 # Give the path to your test
+    shutil.rmtree(temp_path, ignore_errors=True)    # Clean up after test completes
 
 
 # ========================================================================================
@@ -42,7 +43,7 @@ def temp_dir():
 @pytest.fixture
 def mock_logger():
     """
-    🎭 Creates a fake logger for testing.
+    Creates a fake logger for testing.
     
     - Replaces real logger with safe mock
     - Pre-configured with realistic return values
@@ -51,20 +52,20 @@ def mock_logger():
     Usage: def test_something(mock_logger):
            mock_logger.add.assert_called_once()
     """
-    # 🔄 PATCH: Temporarily replace 'logmanager.logger' with a fake object
+    # PATCH: Temporarily replace 'logmanager.logger' with a fake object
     # patch() swaps out the real Loguru logger with a controllable test double
-    with patch('utilities.logger.logger') as mock:  # 🎭 Replace real logger with fake one
+    with patch('utilities.logger.logger') as mock:  # Replace real logger with fake one
         
-        # 🎪 MAGICMOCK: Fake objects that automatically provide any method/attribute
+        # MAGICMOCK: Fake objects that automatically provide any method/attribute
         # When code calls mock.some_method(), MagicMock pretends it exists and records the call
         
         # Set up fake return values for common logger methods
-        mock.add.return_value = '123'                     # 🆔 Fake handler ID
-        mock.level.return_value = MagicMock(no=20)        # 📊 Fake log level object (INFO=20)
-        mock.bind.return_value = MagicMock()              # 🔗 Fake bound logger
-        mock.remove.return_value = None                   # ❌ Remove does nothing
-        mock.configure.return_value = None                # ⚙️ Configure does nothing
-        yield mock  # 🎁 Give the fake logger to your test
+        mock.add.return_value = '123'                     # Fake handler ID
+        mock.level.return_value = MagicMock(no=20)        # Fake log level object (INFO=20)
+        mock.bind.return_value = MagicMock()              # Fake bound logger
+        mock.remove.return_value = None                   # Remove does nothing
+        mock.configure.return_value = None                # ⚙️onfigure does nothing
+        yield mock  # Give the fake logger to your test
 
 
 # ========================================================================================
@@ -127,9 +128,31 @@ def log_manager(mock_logger, default_config):
     """
     # mock_logger is needed to patch logger.remove() calls during LogManager init
     
-    # 📄 MOCK FILE READING: Replace real file operations with fake data
+    # MOCK FILE READING: Replace real file operations with fake data
     # patch('builtins.open') temporarily replaces Python's open() with a fake version during testing.
     with patch('builtins.open', mock_open(read_data=yaml.dump(default_config))):
         # When LogManager calls open(DEFAULT_CONFIG_PATH, 'r'), it gets our fake default_config
         # converted to YAML string instead of reading the real default config file
         return LogManager()  # ← NO config_path = uses DEFAULT_CONFIG_PATH
+
+# ========================================================================================
+# HDFS COPY TEST FIXTURES
+# ========================================================================================
+
+@pytest.fixture
+def sample_log_files(temp_dir):
+    """
+    Create sample log files for HDFS copy testing.
+    
+    Creates 3 test log files with content.
+
+    Usage: files = _discover_files_to_copy(temp_dir)
+           assert len(files) == 3
+    """
+    files = []
+    for i in range(3):
+        file_path = Path(temp_dir) / f"app_{i}_log.txt"
+        with file_path.open('w') as f:
+            f.write(f"Log content for file {i}")
+        files.append(str(file_path))
+    return files

@@ -514,6 +514,15 @@ class LogManager:
             raise ValueError("hdfs_destination cannot be empty")
         if copy_interval <= 0:
             raise ValueError("copy_interval must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if retry_delay < 0:
+            raise ValueError("retry_delay cannot be negative")
+        if preserve_structure and not root_dir:
+            raise ValueError(
+                "'root_dir' must be specified when 'preserve_structure' is True. "
+                "This is required to maintain the directory structure in HDFS."
+            )
         
         # Create stop event for this copy operation
         stop_event = threading.Event()
@@ -711,11 +720,6 @@ class LogManager:
         
         for local_file in local_files:
             if preserve_structure:
-                if not root_dir:
-                    raise ValueError(
-                        "'root_dir' must be specified when 'preserve_structure' is True"
-                        " This is required to maintain the directory structure in HDFS."
-                    )
                 rel_path = os.path.relpath(local_file, root_dir)
                 dest_path = os.path.join(hdfs_destination, rel_path).replace("\\", "/")
             else:
