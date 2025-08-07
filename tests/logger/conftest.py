@@ -211,3 +211,45 @@ def mock_thread():
         
         yield mock_thread
 
+@pytest.fixture
+def mock_event():
+    """
+    Creates a mock threading.Event for testing Event functionality.
+    
+    - Replaces real threading.Event with controllable mock
+    - Pre-configured with realistic behavior for Event instances
+    - Allows verification of event creation and method calls
+    
+    Usage: def test_something(mock_event):
+           mock_event.return_value.set.assert_called_once()
+           mock_event.return_value.wait.assert_called_once()
+    """
+    with patch('utilities.logger.threading.Event') as mock_event:
+        mock_event_instance = MagicMock()
+        
+        # Create a state variable to track if the event is set
+        event_state = {'is_set': False}
+        
+        def mock_set():
+            event_state['is_set'] = True
+            
+        def mock_clear():
+            event_state['is_set'] = False
+            
+        def mock_is_set():
+            return event_state['is_set']
+            
+        def mock_wait(timeout=None):
+            # In real Event, wait() returns True if event is set, False if timeout
+            return event_state['is_set']
+        
+        # Configure realistic behavior for Event methods
+        mock_event_instance.set.side_effect = mock_set
+        mock_event_instance.clear.side_effect = mock_clear
+        mock_event_instance.is_set.side_effect = mock_is_set
+        mock_event_instance.wait.side_effect = mock_wait
+        
+        mock_event.return_value = mock_event_instance
+        
+        yield mock_event
+

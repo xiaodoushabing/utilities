@@ -30,10 +30,7 @@ class TestHStartDFSCopyValidation:
         with pytest.raises(ValueError):
             log_manager.start_hdfs_copy(**params)
     
-    @patch('utilities.logger.threading.Event')
     def test_duplicate_copy_name_rejected(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
-        mock_event.return_value = MagicMock()
-        
         # First call should succeed and create tracking entries
         log_manager.start_hdfs_copy(**hdfs_copy_defaults)
         
@@ -45,10 +42,7 @@ class TestHStartDFSCopyValidation:
 class TestDFSCopyLifecycle:
     """Test HDFS copy operation lifecycle."""
     
-    @patch('utilities.logger.threading.Event')
     def test_start_creates_thread_and_tracking(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
-        mock_event.return_value = MagicMock()
-        
         copy_name = hdfs_copy_defaults["copy_name"]
         expected_thread_name = f"HDFSCopy-{copy_name}"
         
@@ -67,10 +61,7 @@ class TestDFSCopyLifecycle:
 
         mock_thread.return_value.start.assert_called_once()
     
-    @patch('utilities.logger.threading.Event')
     def test_stop_cleans_up_properly(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
-        mock_event.return_value = MagicMock()
-        
         copy_name = hdfs_copy_defaults["copy_name"]
         log_manager.start_hdfs_copy(**hdfs_copy_defaults)
         
@@ -260,7 +251,6 @@ class TestFileCopying:
 class TestWorkerThread:
     """Test HDFS copy worker thread behavior."""
     
-    @patch('utilities.logger.threading.Event')
     @patch('utilities.logger.LogManager._copy_files_to_hdfs')
     @patch('utilities.logger.LogManager._discover_files_to_copy')
     def test_worker_processes_files_when_found(self, mock_discover, mock_copy, mock_event, log_manager):
@@ -302,7 +292,6 @@ class TestWorkerThread:
         assert mock_stop_event.is_set.call_count == 2
         mock_stop_event.wait.assert_called_once_with(timeout=0.1)
 
-    @patch('utilities.logger.threading.Event')
     @patch('utilities.logger.LogManager._copy_files_to_hdfs')
     @patch('utilities.logger.LogManager._discover_files_to_copy')
     def test_worker_stops_when_stop_event_is_set(self, mock_discover, mock_copy, mock_event, log_manager):
