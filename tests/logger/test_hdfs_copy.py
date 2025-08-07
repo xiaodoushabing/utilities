@@ -30,13 +30,16 @@ class TestHStartDFSCopyValidation:
         with pytest.raises(ValueError):
             log_manager.start_hdfs_copy(**params)
     
-    def test_duplicate_copy_name_rejected(self, log_manager, hdfs_copy_defaults):
+    @patch('utilities.logger.threading.Event')
+    def test_duplicate_copy_name_rejected(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
+        mock_event.return_value = MagicMock()
+        
+        # First call should succeed and create tracking entries
         log_manager.start_hdfs_copy(**hdfs_copy_defaults)
         
+        # Second call with same name should fail
         with pytest.raises(ValueError, match="already exists"):
             log_manager.start_hdfs_copy(**hdfs_copy_defaults)
-
-        log_manager.stop_hdfs_copy(hdfs_copy_defaults["copy_name"])
 
 
 class TestDFSCopyLifecycle:
