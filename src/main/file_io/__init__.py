@@ -65,7 +65,7 @@ class FileIOInterface:
         
         Args:
             read_path (str): Path to the source file.
-            copy_path (str): Path to the destination file.
+            dest_path (str): Path to the destination file.
             filesystem (Optional[str]): Filesystem type, if any.
         """
         fileio: BaseFileIO = __class__._instantiate(fpath=read_path, filesystem=filesystem, *args, **kwargs)

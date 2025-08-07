@@ -131,7 +131,7 @@ class TestFileCopying:
             
             log_manager._copy_files_to_hdfs(
                 local_files=["/root_dir/app/logs/file.log"],
-                hdfs_destination="hdfs://dest/",
+                hdfs_destination="hdfs://dest",
                 create_dest_dirs=True,
                 preserve_structure=True,
                 root_dir="/root_dir/",
@@ -142,7 +142,7 @@ class TestFileCopying:
         mock_fmakedirs.assert_called_once_with("hdfs://dest/app/logs", exist_ok=True)
         mock_fcopy.assert_called_once_with(
             read_path="/root_dir/app/logs/file.log",
-            dest_path="hdfs://dest//app/logs/file.log" 
+            dest_path="hdfs://dest/app/logs/file.log"
         )
     
     @patch('utilities.logger.FileIOInterface.fcopy')
@@ -154,7 +154,7 @@ class TestFileCopying:
             
             log_manager._copy_files_to_hdfs(
                 local_files=["/complex/nested/path/file.log"],
-                hdfs_destination="hdfs://dest/",
+                hdfs_destination="hdfs://dest",
                 create_dest_dirs=True,
                 preserve_structure=False,
                 root_dir=None,
@@ -166,7 +166,7 @@ class TestFileCopying:
         mock_fmakedirs.assert_called_once_with("hdfs://dest", exist_ok=True)
         mock_fcopy.assert_called_once_with(
             read_path="/complex/nested/path/file.log",
-            dest_path="hdfs://dest//file.log"
+            dest_path="hdfs://dest/file.log"
         )
     
     @patch('utilities.logger.FileIOInterface.fcopy')
@@ -177,7 +177,7 @@ class TestFileCopying:
             
             log_manager._copy_files_to_hdfs(
                 local_files=["/tmp/file.log"],
-                hdfs_destination="hdfs://dest/",
+                hdfs_destination="hdfs://dest",
                 create_dest_dirs=False,
                 preserve_structure=False,
                 root_dir=None,
@@ -189,7 +189,7 @@ class TestFileCopying:
         mock_fmakedirs.assert_not_called()
         mock_fcopy.assert_called_once_with(
             read_path="/tmp/file.log",
-            dest_path="hdfs://dest//file.log"
+            dest_path="hdfs://dest/file.log"
         )
     
     @patch('utilities.logger.FileIOInterface.fcopy')
@@ -206,7 +206,7 @@ class TestFileCopying:
 
             log_manager._copy_files_to_hdfs(
                 local_files=["/tmp/file.log"],
-                hdfs_destination="hdfs://dest/",
+                hdfs_destination="hdfs://dest",
                 create_dest_dirs=False,
                 preserve_structure=False,
                 root_dir=None,
@@ -236,7 +236,7 @@ class TestFileCopying:
 
             log_manager._copy_files_to_hdfs(
                 local_files=["/tmp/file.log"],
-                hdfs_destination="hdfs://dest/",
+                hdfs_destination="hdfs://dest",
                 create_dest_dirs=False,
                 preserve_structure=False,
                 root_dir=None,
@@ -269,7 +269,7 @@ class TestWorkerThread:
         log_manager._hdfs_copy_worker(
             copy_name="test_worker",
             path_patterns=["/tmp/*.log"],
-            hdfs_destination="hdfs://dest/",
+            hdfs_destination="hdfs://dest",
             copy_interval=0.1,
             create_dest_dirs=True,
             preserve_structure=False,
@@ -282,7 +282,7 @@ class TestWorkerThread:
         mock_discover.assert_called_with(["/tmp/*.log"])
         mock_copy.assert_called_with(
             ["/tmp/file1.log", "/tmp/file2.log"],
-            "hdfs://dest/",
+            "hdfs://dest",
             True,  # create_dest_dirs
             False,  # preserve_structure
             None,  # root_dir
@@ -310,7 +310,7 @@ class TestWorkerThread:
         log_manager._hdfs_copy_worker(
             copy_name="test_worker_stop",
             path_patterns=["/tmp/*.log"],
-            hdfs_destination="hdfs://dest/",
+            hdfs_destination="hdfs://dest",
             copy_interval=0.1,
             create_dest_dirs=True,
             preserve_structure=False,
