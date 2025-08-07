@@ -39,7 +39,7 @@ class TestHStartDFSCopyValidation:
             log_manager.start_hdfs_copy(**hdfs_copy_defaults)
 
 
-class TestDFSCopyLifecycle:
+class TestHDFSCopyLifecycle:
     """Test HDFS copy operation lifecycle."""
     
     def test_start_creates_thread_and_tracking(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
@@ -51,8 +51,10 @@ class TestDFSCopyLifecycle:
         mock_event.assert_called_once()
         mock_thread.assert_called_once()
         call_args = mock_thread.call_args[1]
+
         assert call_args['daemon'] is True
         assert call_args['name'] == expected_thread_name
+        assert call_args['target'] == log_manager._hdfs_copy_worker
         
         assert copy_name in log_manager._hdfs_copy_threads
         assert copy_name in log_manager._stop_events
