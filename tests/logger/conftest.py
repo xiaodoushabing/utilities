@@ -196,18 +196,25 @@ def mock_thread():
            mock_thread.join.assert_called_once()
     """
     with patch('utilities.logger.threading.Thread') as mock_thread:
+        # Create a single mock instance that will be returned for all calls
         mock_thread_instance = MagicMock()
-        mock_thread_instance.name = "MockThread"
-        mock_thread_instance.daemon = True
-        mock_thread_instance.is_alive.return_value = True
         
-        def mock_join(timeout=None):
-            mock_thread_instance.is_alive.return_value = False
-            return None
+        def create_mock_thread(*args, **kwargs):
+            # Set the thread name from kwargs if provided, otherwise use default
+            mock_thread_instance.name = kwargs.get('name', 'MockThread')
+            mock_thread_instance.daemon = kwargs.get('daemon', False)
+            mock_thread_instance.is_alive.return_value = True
+            
+            def mock_join(timeout=None):
+                mock_thread_instance.is_alive.return_value = False
+                return None
+            
+            mock_thread_instance.join.side_effect = mock_join
+            
+            return mock_thread_instance
         
-        mock_thread_instance.join.side_effect = mock_join
-        
-        mock_thread.return_value = mock_thread_instance
+        mock_thread.side_effect = create_mock_thread
+        mock_thread.return_value = mock_thread_instance  # Also set return_value for compatibility
         
         yield mock_thread
 

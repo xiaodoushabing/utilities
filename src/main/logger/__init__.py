@@ -12,6 +12,7 @@ import yaml
 import glob
 import threading
 import time
+import signal
 from pathlib import Path
 from typing import Optional, List, Union
 from collections import defaultdict
@@ -43,13 +44,7 @@ class LogManager:
         """
         # update timezone
         os.environ["TZ"] = timezone
-        # if platform.system() == "Windows":
-        #     # Windows requires tzset to apply the timezone change
-        #     import time as win_time
-        #     win_time.tzset()
-        # else:
-        #     # For Unix-like systems, use the standard time module
-        #     time.tzset()
+        # time.tzset()
 
         # logger mappers
         self._handlers_map = defaultdict(dict)  # handler_name -> {id: handler_id, loggers: {logger_name: level}}
@@ -74,17 +69,43 @@ class LogManager:
         
         # setup logger
         logger.remove()  # remove default logger
-        self._config_path = config_path         # Empty config_path is handled in _setup_logger
+        self._config_path = config_path         # empty config_path is handled in _setup_logger
         self.config = {}
         self._setup_logger()
 
         # HDFS copy management
-        self._hdfs_copy_threads = {}  # thread_name -> thread object
-        self._stop_events = {}        # thread_name -> threading.Event
+        self._hdfs_copy_threads = {}            # thread_name -> thread object
+        self._stop_events = {}                  # thread_name -> threading.Event
+        self._shutdown_in_progress = False      # flag to prevent new copy operations during shutdown
+        self._setup_signal_handlers()           # setup signal handlers for graceful shutdown
 
         # teardown
         atexit.register(self._cleanup)
+    
+    ## ------------------------------ SETUP SIGNAL HANDLERS ------------------------------ ##
+
+    def _setup_signal_handlers(self):
+        """Setup signal handlers for graceful shutdown."""
+        def signal_handler(signum, frame):
+            """Modify signal handler to perform cleanup."""
+            print(f"\nReceived signal '{signum}'. Stopping all HDFS copy operations and cleaning up...")
+            self._cleanup(hdfs_timeout=60.0)
+            # restore default handler and re-raise signal
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
         
+        # register modified handler for common termination signals
+        if hasattr(signal, 'SIGTERM'):
+            try:
+                signal.signal(signal.SIGINT, signal_handler)
+                signal.signal(signal.SIGTERM, signal_handler)
+                print("Signal handlers registered")
+            except Exception as e:
+                print(
+                    f"Could not register signal handlers: {e}.\n"
+                    f"LogManager will rely on atexit for cleanup instead."
+                )
+
     ## ------------------------------ SETUP LOGGER ------------------------------ ##
     def _setup_logger(self):
         """
@@ -506,6 +527,8 @@ class LogManager:
         # Validate parameters
         if not copy_name:
             raise ValueError("copy_name cannot be empty")
+        if self._shutdown_in_progress:
+            raise ValueError("Cannot start new HDFS copy operations: LogManager is shutting down")
         if copy_name in self._hdfs_copy_threads:
             raise ValueError(f"HDFS copy operation '{copy_name}' already exists. Use stop_hdfs_copy() first.")
         if not path_patterns:
@@ -543,7 +566,7 @@ class LogManager:
                 retry_delay,
                 stop_event
             ),
-            daemon=True,
+            daemon=False,
             name=f"HDFSCopy-{copy_name}"
         )
         
@@ -589,16 +612,23 @@ class LogManager:
         print(f"Stopped HDFS copy operation '{copy_name}'")
         return True
 
-    def stop_all_hdfs_copy(self, timeout: float = 10.0) -> List[str]:
+    def stop_all_hdfs_copy(self, timeout: float = 30.0, verbose: bool = False) -> List[str]:
         """
         Stop all running HDFS copy operations.
         
         Args:
-            timeout (float): Maximum time to wait for each thread to stop.
+            timeout (float): Maximum time to wait for each thread to stop. Defaults to 30 seconds.
+            verbose (bool): Whether to provide detailed feedback during the operation. Defaults to False.
             
         Returns:
             List[str]: Names of copy operations that failed to stop within timeout.
         """
+        if not self._hdfs_copy_threads:
+            return []
+            
+        if verbose:
+            print(f"Stopping {len(self._hdfs_copy_threads)} HDFS copy operation(s)...")
+            
         failed_to_stop = []
         copy_names = list(self._hdfs_copy_threads.keys())
         
@@ -610,6 +640,15 @@ class LogManager:
                 print(f"Error stopping HDFS copy operation '{copy_name}': {e}")
                 failed_to_stop.append(copy_name)
         
+        if verbose:
+            if failed_to_stop:
+                print(
+                    f"WARNING: Some HDFS copy operations did not stop cleanly: {failed_to_stop}\n"
+                    f"Please check the threads manually."
+                )
+            else:
+                print("All HDFS copy operations stopped successfully.")
+                
         return failed_to_stop
 
     def list_hdfs_copy_operations(self) -> List[dict]:
@@ -757,22 +796,28 @@ class LogManager:
             print(f"HDFS copy completed: {success_count} successful, {error_count} failed")
 
     ## ------------------------------ TEARDOWN ------------------------------ ##
-    def _cleanup(self):
+    def _cleanup(self, hdfs_timeout: float = 60.0):
         """
         Cleanup function to remove all handlers and loggers.
         
         This method is automatically called on program exit via atexit.register().
         It ensures proper cleanup of all Loguru handlers and clears the internal
         mapping dictionaries. It also stops all HDFS copy operations.
+        
+        Args:
+            hdfs_timeout (float): Timeout in seconds for stopping HDFS operations.
+                                    Defaults to 60.0.
+        
+        Note: This method can be called multiple times safely.
         """
-        # Stop all HDFS copy operations
-        failed_to_stop = self.stop_all_hdfs_copy()
-        if failed_to_stop:
-            print(
-                f"Warning: Some HDFS copy operations did not stop cleanly: {failed_to_stop}\n"
-                f"Please check the threads manually."
-            )
-
+        if self._shutdown_in_progress:
+            return
+        
+        self._shutdown_in_progress = True
+        
+        print("LogManager cleanup initiated...")
+        self.stop_all_hdfs_copy(timeout=hdfs_timeout, verbose=True)
         logger.remove()
         self._handlers_map.clear()
-        self._loggers_map.clear()
+        self._loggers_map.clear()        
+        print("LogManager cleanup completed.")

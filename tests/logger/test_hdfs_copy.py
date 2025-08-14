@@ -37,6 +37,14 @@ class TestHStartDFSCopyValidation:
         # Second call with same name should fail
         with pytest.raises(ValueError, match="already exists"):
             log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+    
+    def test_cannot_start_hdfs_copy_during_shutdown(self, log_manager, hdfs_copy_defaults):
+        """Test that HDFS copy operations cannot be started during shutdown."""
+        # Simulate shutdown in progress
+        log_manager._shutdown_in_progress = True
+        
+        with pytest.raises(ValueError, match="LogManager is shutting down"):
+            log_manager.start_hdfs_copy(**hdfs_copy_defaults)
 
 
 class TestHDFSCopyLifecycle:
@@ -52,7 +60,7 @@ class TestHDFSCopyLifecycle:
         mock_thread.assert_called_once()
         call_args = mock_thread.call_args[1]
 
-        assert call_args['daemon'] is True
+        assert call_args['daemon'] is False
         assert call_args['name'] == expected_thread_name
         assert call_args['target'] == log_manager._hdfs_copy_worker
         
@@ -80,7 +88,7 @@ class TestHDFSCopyLifecycle:
         with pytest.raises(ValueError, match="does not exist"):
             log_manager.stop_hdfs_copy("nonexistent")
     
-    def test_list_operations_shows_active_copies(self, log_manager, hdfs_copy_defaults):
+    def test_list_operations_shows_active_copies(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
         assert log_manager.list_hdfs_copy_operations() == []
 
         copy_name = hdfs_copy_defaults["copy_name"]
@@ -90,10 +98,10 @@ class TestHDFSCopyLifecycle:
         assert len(operations) == 1
         assert operations[0]["name"] == copy_name
         assert operations[0]["thread_name"] == f"HDFSCopy-{copy_name}"
-        assert operations[0]["daemon"] is True
+        assert operations[0]["daemon"] is False
         assert operations[0]["is_alive"] is True
 
-    def test_stop_all_operations(self, log_manager, hdfs_copy_defaults):
+    def test_stop_all_operations(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
         copy_name = hdfs_copy_defaults["copy_name"]
         log_manager.start_hdfs_copy(**hdfs_copy_defaults)
         
@@ -332,7 +340,7 @@ class TestWorkerThread:
 class TestCleanup:
     """Test LogManager cleanup functionality."""
     
-    def test_cleanup_stops_all_hdfs_operations_and_clears_mappings(self, mock_logger, log_manager, hdfs_copy_defaults):
+    def test_cleanup_stops_all_hdfs_operations_and_clears_mappings(self, mock_event, mock_logger, log_manager, hdfs_copy_defaults, mock_thread):
         copy_name1 = "cleanup_test1"
         copy_name2 = "cleanup_test2"
         
@@ -357,7 +365,7 @@ class TestCleanup:
         with patch.object(log_manager, 'stop_all_hdfs_copy', return_value=["failed_op1", "failed_op2"]):
             log_manager._cleanup()
         
-        mock_print.assert_called_once()
+        assert mock_print.call_count == 2
         
     def test_cleanup_with_no_hdfs_operations(self, mock_logger, log_manager):
         with patch.object(log_manager, 'stop_all_hdfs_copy', return_value=[]) as mock_stop_all:
@@ -366,3 +374,16 @@ class TestCleanup:
             
             # Verify stop_all_hdfs_copy was called once
             mock_stop_all.assert_called_once()
+    
+    def test_cleanup_can_be_called_multiple_times_safely(self, mock_event, mock_logger, log_manager, hdfs_copy_defaults, mock_thread):
+        """Test that cleanup method can be called multiple times without issues."""
+        # Start an operation
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Call cleanup twice
+        log_manager._cleanup()
+        log_manager._cleanup()  # Second call should be safe
+        
+        # Verify operations are stopped and shutdown flag is set
+        assert len(log_manager._hdfs_copy_threads) == 0
+        assert log_manager._shutdown_in_progress is True
