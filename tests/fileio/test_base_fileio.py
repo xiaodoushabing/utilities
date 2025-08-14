@@ -165,6 +165,8 @@ class TestBaseFileIOFileRead:
         with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
             mock_json_io = MagicMock()
             mock_json_io._read.return_value = {"key": "value"}
+            # Ensure the mapping contains the expected key for validation
+            mock_mapping.__contains__.return_value = True
             mock_mapping.__getitem__.return_value = mock_json_io
             
             fileio = BaseFileIO(upath_obj=mock_upath)
@@ -192,6 +194,8 @@ class TestBaseFileIOFileRead:
             with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
                 mock_io_class = MagicMock()
                 mock_io_class._read.return_value = f"parsed_{ext}_data"
+                # Ensure the mapping contains the expected key for validation
+                mock_mapping.__contains__.return_value = True
                 mock_mapping.__getitem__.return_value = mock_io_class
                 
                 fileio = BaseFileIO(upath_obj=mock_upath)
@@ -240,33 +244,37 @@ class TestBaseFileIOFileCopy:
         
         # Mock source file content
         source_content = b"test file content"
+        
+        # Create proper context manager mocks
         mock_src_file = MagicMock()
         mock_src_file.read.return_value = source_content
+        mock_src_file.__enter__ = MagicMock(return_value=mock_src_file)
+        mock_src_file.__exit__ = MagicMock(return_value=None)
         
-        # Mock destination file
         mock_dest_file = MagicMock()
+        mock_dest_file.__enter__ = MagicMock(return_value=mock_dest_file)
+        mock_dest_file.__exit__ = MagicMock(return_value=None)
         
-        # Mock file system operations
-        mock_upath.fs.open.side_effect = [
-            mock_src_file,  # Source file open
-            mock_dest_file  # Destination file open
-        ]
+        # Mock file system operations - different fs for source and dest
+        mock_upath.fs.open.return_value = mock_src_file
         
         # Mock destination UPath creation
         with patch('src.main.file_io._base.UPath') as mock_upath_class:
             mock_dest_upath = MagicMock()
             mock_dest_upath.path = "/dest/file.txt"
-            mock_dest_upath.fs = mock_upath.fs  # Same filesystem
+            mock_dest_fs = MagicMock()
+            mock_dest_fs.open.return_value = mock_dest_file
+            mock_dest_upath.fs = mock_dest_fs
             mock_upath_class.return_value = mock_dest_upath
             
             fileio = BaseFileIO(upath_obj=mock_upath)
             fileio._copy(dest_path="/dest/file.txt")
             
             # Verify source file was opened for reading
-            assert call(mock_upath.path, 'rb') in mock_upath.fs.open.call_args_list
+            mock_upath.fs.open.assert_called_with(mock_upath.path, 'rb')
             
             # Verify destination file was opened for writing
-            assert call("/dest/file.txt", 'wb') in mock_upath.fs.open.call_args_list
+            mock_dest_fs.open.assert_called_with("/dest/file.txt", 'wb')
             
             # Verify content was written to destination
             mock_dest_file.write.assert_called_once_with(source_content)
@@ -319,6 +327,8 @@ class TestBaseFileIOFileWrite:
         
         with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
             mock_json_io = MagicMock()
+            # Ensure the mapping contains the expected key for validation
+            mock_mapping.__contains__.return_value = True
             mock_mapping.__getitem__.return_value = mock_json_io
             
             fileio = BaseFileIO(upath_obj=mock_upath)
@@ -336,7 +346,10 @@ class TestBaseFileIOFileWrite:
         
         with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
             mock_txt_io = MagicMock()
-            mock_mapping.__getitem__.return_value = mock_txt_io
+            # Configure the mapping to contain 'txt' and return the mock IO class
+            mock_mapping.__contains__ = MagicMock(side_effect=lambda x: x == 'txt')
+            mock_mapping.__getitem__ = MagicMock(return_value=mock_txt_io)
+            mock_mapping.keys.return_value = ['txt']  # For error message if needed
             
             fileio = BaseFileIO(upath_obj=mock_upath)
             fileio._fwrite(data="test", encoding="utf-8", mode="w")

@@ -20,6 +20,7 @@ import json
 import yaml
 import tempfile
 import pandas as pd
+import warnings
 from pathlib import Path
 
 from src.main.file_io import FileIOInterface
@@ -233,8 +234,11 @@ class TestFileIOIntegrationDirectoryOperations:
         assert os.path.exists(test_dir)
         
         # Attempt to create same directory again should raise error
-        with pytest.raises(OSError):
-            FileIOInterface.fmakedirs(path=test_dir, exist_ok=False)
+        # We expect a warning to be issued before the OSError is raised
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(OSError):
+                FileIOInterface.fmakedirs(path=test_dir, exist_ok=False)
 
     def test_fdelete_removes_files_integration(self, temp_dir):
         """Test that fdelete removes files successfully."""
@@ -317,8 +321,11 @@ class TestFileIOIntegrationErrorHandling:
         """Test that getting info for non-existent file raises OSError."""
         nonexistent_path = os.path.join(temp_dir, "does_not_exist.txt")
         
-        with pytest.raises(OSError):
-            FileIOInterface.finfo(fpath=nonexistent_path)
+        # We expect a warning to be issued before the OSError is raised
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with pytest.raises(OSError):
+                FileIOInterface.finfo(fpath=nonexistent_path)
 
     def test_fcopy_nonexistent_source_raises_error(self, temp_dir):
         """Test that copying non-existent source file raises FileNotFoundError."""

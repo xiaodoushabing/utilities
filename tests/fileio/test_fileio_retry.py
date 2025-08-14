@@ -13,6 +13,7 @@ Retry test areas:
 
 import pytest
 import time
+import warnings
 from unittest.mock import patch, MagicMock, call
 
 from src.main.file_io import FileIOInterface
@@ -73,27 +74,46 @@ class TestFileIORetryFunctionality:
     @patch('src.main._aux._aux.Retrying')
     def test_retry_on_transient_failure_then_success(self, mock_retrying_class, mock_fsspec):
         """Test retry behavior when operation fails then succeeds."""
+        # Set up retry mock to actually call function with retry logic
         attempt_count = 0
         
-        def mock_retry_execution(func, *args, **kwargs):
+        def mock_retry_call(func, *args, **kwargs):
             nonlocal attempt_count
-            attempt_count += 1
+            max_attempts = 3
+            last_exception = None
             
-            if attempt_count == 1:
-                # First attempt fails
-                raise OSError("Temporary network error")
-            else:
-                # Second attempt succeeds
-                return func(*args, **kwargs)
+            for attempt in range(max_attempts):
+                try:
+                    attempt_count += 1
+                    result = func(*args, **kwargs)
+                    return result  # Success - return the result
+                except OSError as e:
+                    last_exception = e
+                    if attempt == max_attempts - 1:
+                        raise e
+                    continue
+            
+            if last_exception:
+                raise last_exception
         
         mock_retrying_instance = MagicMock()
-        mock_retrying_instance.side_effect = mock_retry_execution
+        mock_retrying_instance.side_effect = mock_retry_call
         mock_retrying_class.return_value = mock_retrying_instance
         
         with patch.object(FileIOInterface, '_instantiate') as mock_instantiate:
-            mock_fileio = MagicMock()
-            mock_fileio._finfo.return_value = {"size": 100}
-            mock_instantiate.return_value = mock_fileio
+            # Create a mock that fails on first call, succeeds on second
+            call_count = 0
+            def failing_instantiate(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise OSError("Temporary network error")
+                else:
+                    mock_fileio = MagicMock()
+                    mock_fileio._finfo.return_value = {"size": 100}
+                    return mock_fileio
+            
+            mock_instantiate.side_effect = failing_instantiate
             
             # This should succeed after retry
             result = FileIOInterface.finfo(fpath="/test/file.txt", max_attempts=3)
@@ -108,15 +128,31 @@ class TestFileIORetryFunctionality:
     def test_retry_exhausts_attempts_and_reraises(self, mock_retrying_class, mock_fsspec):
         """Test that retry exhausts attempts and re-raises the final error."""
         
-        def mock_retry_execution(func, *args, **kwargs):
-            # Always fail
-            raise OSError("Persistent error")
+        def mock_retry_call(func, *args, **kwargs):
+            max_attempts = 2
+            last_exception = None
+            
+            for attempt in range(max_attempts):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except OSError as e:
+                    last_exception = e
+                    if attempt == max_attempts - 1:
+                        raise e
+                    continue
+            
+            if last_exception:
+                raise last_exception
         
         mock_retrying_instance = MagicMock()
-        mock_retrying_instance.side_effect = mock_retry_execution
+        mock_retrying_instance.side_effect = mock_retry_call
         mock_retrying_class.return_value = mock_retrying_instance
         
-        with patch.object(FileIOInterface, '_instantiate'):
+        with patch.object(FileIOInterface, '_instantiate') as mock_instantiate:
+            # Make _instantiate always fail
+            mock_instantiate.side_effect = OSError("Persistent error")
+            
             # This should eventually raise the error
             with pytest.raises(OSError, match="Persistent error"):
                 FileIOInterface.finfo(fpath="/test/file.txt", max_attempts=2)
@@ -198,7 +234,10 @@ class TestFileIORetryFunctionality:
                 # Call method - should not raise exception
                 method = getattr(FileIOInterface, method_name)
                 try:
-                    method(**all_kwargs)
+                    # Suppress expected warnings for test operations on non-existent paths
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", UserWarning)
+                        method(**all_kwargs)
                 except Exception as e:
                     pytest.fail(f"Method {method_name} failed with retry params: {e}")
 

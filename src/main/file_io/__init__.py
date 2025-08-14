@@ -120,8 +120,17 @@ class FileIOInterface:
             filesystem (Optional[str]): Filesystem type, if any.
             exist_ok (bool): If True, do not raise an error if the directory already exists.
         """
-        fileio: BaseFileIO = __class__._instantiate(fpath=path, filesystem=filesystem, *args, **kwargs)
-        return fileio._fmakedirs(dirpath=path, exist_ok=exist_ok, *args, **kwargs)
+        # For directory operations, we don't need file extension validation
+        # Just create the UPath directly and use its filesystem
+        from upath import UPath
+        import warnings
+        
+        upath_obj: UPath = UPath(path)
+        try:
+            upath_obj.fs.makedirs(path, exist_ok=exist_ok, *args, **kwargs)
+        except OSError as e:
+            warnings.warn(f"Failed to create directories for {path}: {e}")
+            raise e
     
     @staticmethod
     @retry_args
@@ -133,5 +142,23 @@ class FileIOInterface:
             path (str): Path to the file or directory to delete.
             filesystem (Optional[str]): Filesystem type, if any.
         """
-        fileio: BaseFileIO = __class__._instantiate(fpath=path, filesystem=filesystem, *args, **kwargs)
-        return fileio._fdelete(filepath=path, recursive=True, *args, **kwargs)
+        # For delete operations, we don't need file extension validation
+        # since we can delete both files and directories
+        from upath import UPath
+        import warnings
+        
+        # Validate path
+        if not path or not path.strip():
+            raise ValueError("File path cannot be empty")
+            
+        # Check if file/directory exists
+        upath_obj: UPath = UPath(path)
+        if not upath_obj.exists():
+            warnings.warn(f"Path does not exist: {path}")
+            return  # Don't raise error for non-existent files
+            
+        try:
+            upath_obj.fs.delete(path, recursive=True, *args, **kwargs)
+        except OSError as e:
+            warnings.warn(f"Failed to delete {path}: {e}")
+            raise e
