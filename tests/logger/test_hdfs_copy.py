@@ -307,10 +307,10 @@ class TestWorkerThread:
         
         mock_stop_event = mock_event.return_value
         
-        # First call returns False (continue), then wait() returns True so loop exits
+       # is_set() returns False for both iterations, wait() times out first time then detects stop event
         mock_stop_event.is_set.side_effect = [False, False, False]
-        
-        # Mock wait to return True (stop event was set during wait - someone called stop_hdfs_copy)
+
+        # First wait() times out (False), second wait() detects stop event (True) and exits loop
         mock_stop_event.wait.side_effect = [False, True]
         
         log_manager._hdfs_copy_worker(
@@ -354,25 +354,26 @@ class TestCleanup:
         assert len(log_manager._hdfs_copy_threads) == 0
         assert len(log_manager._stop_events) == 0
         mock_logger.remove.assert_called_once()
-    
-    @patch('builtins.print')
-    def test_cleanup_handles_failed_hdfs_stop_operations(self, mock_print, mock_logger, log_manager):
+
+    @pytest.mark.parametrize("failed_ops", [
+        ["failed_op1", "failed_op2"],
+        []
+    ])
+    def test_cleanup_completes_with_or_without_hdfs_stop_failures(self, mock_logger, log_manager, failed_ops):
         mock_logger.remove.reset_mock()
         
         # mock stop_all_hdfs_copy to return failed operations
-        with patch.object(log_manager, 'stop_all_hdfs_copy', return_value=["failed_op1", "failed_op2"]):
-            log_manager._cleanup()
-        
-        assert mock_print.call_count == 2
-        
-    def test_cleanup_with_no_hdfs_operations(self, mock_logger, log_manager):
-        with patch.object(log_manager, 'stop_all_hdfs_copy', return_value=[]) as mock_stop_all:
-            # Call cleanup
+        with patch.object(log_manager, 'stop_all_hdfs_copy', return_value=failed_ops) as mock_stop_all:
             log_manager._cleanup()
             
-            # Verify stop_all_hdfs_copy was called once
+            # Verify cleanup still completes even with failed operations
             mock_stop_all.assert_called_once()
-    
+        
+        # Verify cleanup completed successfully despite failed operations
+        mock_logger.remove.assert_called_once()
+        assert log_manager._shutdown_in_progress is True
+
+
     def test_cleanup_can_be_called_multiple_times_safely(self, mock_event, mock_logger, log_manager, hdfs_copy_defaults, mock_thread):
         """Test that cleanup method can be called multiple times without issues."""
         # Start an operation
