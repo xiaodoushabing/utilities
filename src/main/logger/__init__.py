@@ -76,6 +76,7 @@ class LogManager:
         # HDFS copy management
         self._hdfs_copy_threads = {}            # thread_name -> thread object
         self._stop_events = {}                  # thread_name -> threading.Event
+        self._copy_operations_files = {}        # copy_name -> set of files being copied
         self._shutdown_in_progress = False      # flag to prevent new copy operations during shutdown
         self._setup_signal_handlers()           # setup signal handlers for graceful shutdown
 
@@ -468,7 +469,7 @@ class LogManager:
         root_dir: Optional[str] = None,
         copy_interval: int = 60,
         create_dest_dirs: bool = True,
-        preserve_structure: bool = True,
+        preserve_structure: bool = False,
         max_retries: int = 3,
         retry_delay: int = 5
     ) -> None:
@@ -571,6 +572,7 @@ class LogManager:
         )
         
         self._hdfs_copy_threads[copy_name] = copy_thread
+        self._copy_operations_files[copy_name] = set()  # Initialize empty file set
         copy_thread.start()
         
         print(f"Started HDFS copy operation '{copy_name}' with {copy_interval}s interval.\n")
@@ -608,6 +610,7 @@ class LogManager:
         
         del self._hdfs_copy_threads[copy_name]
         del self._stop_events[copy_name]
+        del self._copy_operations_files[copy_name]  # Clean up file tracking
         
         print(f"Stopped HDFS copy operation '{copy_name}'")
         return True
@@ -693,6 +696,10 @@ class LogManager:
                 
                 if files_to_copy:
                     print(f"HDFS copy worker '{copy_name}' found {len(files_to_copy)} files to copy.")
+                    
+                    # Check for duplicate files across operations and issue warnings
+                    self._check_for_duplicate_files(copy_name, files_to_copy)
+                    
                     self._copy_files_to_hdfs(
                         files_to_copy,
                         hdfs_destination,
@@ -740,6 +747,41 @@ class LogManager:
                     print(f"Warning: Invalid pattern '{pattern}': {e}")
         
         return list(set(files_to_copy))
+
+    def _check_for_duplicate_files(self, copy_name: str, files_to_copy: List[str]) -> None:
+        """
+        Check if any files in files_to_copy are already being copied by other operations.
+        Issues warnings for duplicate files but doesn't prevent copying.
+        
+        Args:
+            copy_name (str): Name of the current copy operation.
+            files_to_copy (List[str]): List of files that this operation wants to copy.
+        """
+        if not files_to_copy:
+            return
+            
+        current_files = set(files_to_copy)
+        
+        # Check against all other active operations
+        for other_copy_name, other_files in self._copy_operations_files.items():
+            if other_copy_name == copy_name:
+                continue
+                
+            overlapping_files = current_files.intersection(other_files)
+            if overlapping_files:
+                print(
+                    f"WARNING: copy operation '{copy_name}' and '{other_copy_name}' "
+                    f"are both copying {len(overlapping_files)} file(s):"
+                )
+                for file_path in sorted(overlapping_files):
+                    print(f"  - {file_path}")
+                print(
+                    f"This may cause race conditions or unnecessary resource usage. "
+                    f"Consider adjusting your copy operation patterns to avoid overlaps.\n"
+                )
+
+        # Update the file set for this operation
+        self._copy_operations_files[copy_name] = current_files
 
     def _copy_files_to_hdfs(
         self,
@@ -819,5 +861,6 @@ class LogManager:
         self.stop_all_hdfs_copy(timeout=hdfs_timeout, verbose=True)
         logger.remove()
         self._handlers_map.clear()
-        self._loggers_map.clear()        
+        self._loggers_map.clear()
+        self._copy_operations_files.clear()
         print("LogManager cleanup completed.")
