@@ -141,6 +141,21 @@ def log_manager(mock_logger, default_config):
 # ========================================================================================
 
 @pytest.fixture
+def mock_file_discovery():
+    """
+    Mock file discovery to return predictable results for HDFS copy testing.
+    
+    - Replaces LogManager._discover_files_to_copy with controllable mock
+    - Allows tests to control which files are "discovered"
+    - Pre-configured with common return values
+    
+    Usage: def test_something(mock_file_discovery):
+           mock_file_discovery.return_value = ["/tmp/file1.log", "/tmp/file2.log"]
+    """
+    with patch.object(LogManager, '_discover_files_to_copy') as mock:
+        yield mock
+
+@pytest.fixture
 def hdfs_copy_defaults():
     """
     📦 Default parameters for HDFS copy testing.

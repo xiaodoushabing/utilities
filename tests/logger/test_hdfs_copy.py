@@ -262,10 +262,9 @@ class TestWorkerThread:
     """Test HDFS copy worker thread behavior."""
     
     @patch('utilities.logger.LogManager._copy_files_to_hdfs')
-    @patch('utilities.logger.LogManager._discover_files_to_copy')
-    def test_worker_processes_files_when_found(self, mock_discover, mock_copy, mock_event, log_manager):
+    def test_worker_processes_files_when_found(self, mock_copy, mock_file_discovery, mock_event, log_manager):
         """Test worker processes files when they are discovered."""
-        mock_discover.return_value = ["/tmp/file1.log", "/tmp/file2.log"]
+        mock_file_discovery.return_value = ["/tmp/file1.log", "/tmp/file2.log"]
         
         mock_stop_event = mock_event.return_value
         
@@ -287,7 +286,7 @@ class TestWorkerThread:
             stop_event=mock_stop_event
         )
         
-        mock_discover.assert_called_with(["/tmp/*.log"])
+        mock_file_discovery.assert_called_with(["/tmp/*.log"])
         mock_copy.assert_called_with(
             ["/tmp/file1.log", "/tmp/file2.log"],
             "hdfs://dest",
@@ -303,9 +302,8 @@ class TestWorkerThread:
         mock_stop_event.wait.assert_called_once_with(timeout=0.1)
 
     @patch('utilities.logger.LogManager._copy_files_to_hdfs')
-    @patch('utilities.logger.LogManager._discover_files_to_copy')
-    def test_worker_stops_when_stop_event_is_set(self, mock_discover, mock_copy, mock_event, log_manager):
-        mock_discover.return_value = ["/tmp/file1.log", "/tmp/file2.log"]
+    def test_worker_stops_when_stop_event_is_set(self, mock_copy, mock_file_discovery, mock_event, log_manager):
+        mock_file_discovery.return_value = ["/tmp/file1.log", "/tmp/file2.log"]
         
         mock_stop_event = mock_event.return_value
         
@@ -329,7 +327,7 @@ class TestWorkerThread:
         )
         
         # Verify that files were discovered and copied twice 
-        assert mock_discover.call_count == 2
+        assert mock_file_discovery.call_count == 2
         assert mock_copy.call_count == 2
         
         # Verify the stop event was checked only once (loop exited via wait() returning True)
