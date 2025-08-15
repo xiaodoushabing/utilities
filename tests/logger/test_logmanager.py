@@ -82,44 +82,6 @@ class TestLogManagerBasics:
         assert lm._config_path == config_path
         assert lm.config == custom_config
 
-    def test_mock_logger_integration_with_logmanager(self, log_manager, mock_logger):
-        """Test that LogManager operations properly use the mocked logger.
-        
-        PYTEST: Verify that when LogManager performs operations, it actually
-        calls the mocked logger methods, proving the mock injection works.
-        """
-        # Reset mock to start with clean state
-        mock_logger.reset_mock()
-        
-        # Test that get_logger calls mock.bind
-        logger = log_manager.get_logger("logger_a")  # From default config
-        assert logger is not None
-        mock_logger.bind.assert_called_once_with(logger_name="logger_a")
-        
-        # Test that add_handler calls mock.add
-        mock_logger.reset_mock()
-        log_manager.add_handler("test_handler", {
-            'sink': 'sys.stdout',
-            'format': 'simple',
-            'level': 'INFO'
-        })
-        
-        # Verify mock.add was called exactly once
-        mock_logger.add.assert_called_once()
-        
-        # Verify the handler was stored with the mocked return value
-        assert log_manager._handlers_map["test_handler"]["id"] == '123'  # Mock return value
-        
-        # Test that remove_handler calls mock.remove
-        mock_logger.reset_mock()
-        log_manager.remove_handler("test_handler")
-        
-        # Verify mock.remove was called with the stored handler ID
-        mock_logger.remove.assert_called_once_with('123')
-        
-        # Verify handler was removed from internal mapping
-        assert "test_handler" not in log_manager._handlers_map
-
 class TestLogManagerInitialization:
     """Test LogManager initialization and setup behavior."""
     
@@ -155,7 +117,7 @@ class TestLogManagerInitialization:
         lm = LogManager(config_path=temp_dir)
         assert lm._config_path == LogManager.DEFAULT_CONFIG_PATH
 
-class TestMappingCleanup:
+class TestMapping:
     """Test handler-logger relationship cleanup."""
     
     @pytest.fixture
@@ -376,7 +338,7 @@ class TestHandlerManagement:
         
         # Verify handler was added to internal mapping
         assert handler_name in log_manager._handlers_map
-        assert log_manager._handlers_map[handler_name]["id"] == mock_logger.add.return_value
+        assert log_manager._handlers_map[handler_name]["id"] == '123'
         
         # Verify logger.add() was called exactly once
         mock_logger.add.assert_called_once()
@@ -402,7 +364,7 @@ class TestHandlerManagement:
         mock_logger.add.assert_called_once()
         
         # Verify new handler ID stored
-        assert log_manager._handlers_map[handler_name]["id"] == mock_logger.add.return_value
+        assert log_manager._handlers_map[handler_name]["id"] == '123'
     
     def test_remove_handler(self, log_manager, mock_logger, basic_handler_config):
         """Test removing an existing handler."""
