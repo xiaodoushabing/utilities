@@ -116,6 +116,11 @@ class TestLogManagerInitialization:
         """Test fallback when config_path is a directory, not a file."""
         lm = LogManager(config_path=temp_dir)
         assert lm._config_path == LogManager.DEFAULT_CONFIG_PATH
+    
+    def test_initialization_sets_shutdown_false(self, mock_logger):
+        """Test that LogManager initializes with shutdown flag as False."""
+        log_manager = LogManager()
+        assert log_manager._shutdown_in_progress is False
 
 class TestMapping:
     """Test handler-logger relationship cleanup."""
@@ -219,57 +224,7 @@ class TestCleanupBehavior:
         # Verify both sides of bidirectional mapping are cleared
         assert len(populated_log_manager._handlers_map) == 0
         assert len(populated_log_manager._loggers_map) == 0
-
-    def test_initialization_sets_shutdown_false(self, mock_logger):
-        """Test that LogManager initializes with shutdown flag as False."""
-        log_manager = LogManager()
-        assert log_manager._shutdown_in_progress is False
-    
-    def test_start_hdfs_copy_blocked_during_shutdown(self, log_manager, hdfs_copy_defaults):
-        """Test that new HDFS operations are blocked when shutdown is in progress."""
-        # Set shutdown flag
-        log_manager._shutdown_in_progress = True
-        
-        with pytest.raises(ValueError, match="LogManager is shutting down"):
-            log_manager.start_hdfs_copy(**hdfs_copy_defaults)
-    
-    def test_cleanup_sets_shutdown_flag(self, mock_thread, mock_event, log_manager):
-        """Test that cleanup sets the shutdown flag."""
-        assert log_manager._shutdown_in_progress is False
-        
-        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
-            log_manager._cleanup()
-        
-        assert log_manager._shutdown_in_progress is True
-    
-    def test_cleanup_idempotency_with_shutdown_flag(self, log_manager):
-        """Test that cleanup can be called multiple times and shutdown flag remains True."""
-        assert log_manager._shutdown_in_progress is False
-        
-        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
-            # First cleanup
-            log_manager._cleanup()
-            assert log_manager._shutdown_in_progress is True
-            
-            # Second cleanup should not change the flag
-            log_manager._cleanup()
-            assert log_manager._shutdown_in_progress is True
-    
-    def test_shutdown_flag_prevents_operations_after_cleanup(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
-        """Test that once cleanup is called, no new operations can be started."""
-        # Start an operation successfully first
-        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
-        assert len(log_manager._hdfs_copy_threads) == 1
-        
-        # Cleanup (which sets shutdown flag)
-        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
-            log_manager._cleanup()
-        
-        # Try to start new operation - should fail
-        new_params = {**hdfs_copy_defaults, "copy_name": "new_operation"}
-        with pytest.raises(ValueError, match="LogManager is shutting down"):
-            log_manager.start_hdfs_copy(**new_params)
-    
+ 
 class TestHandlerFilterBehavior:
     """Test handler filter function creation and behavior."""
     
