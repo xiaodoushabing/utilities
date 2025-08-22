@@ -125,6 +125,53 @@ class TestSignalHandlerBehavior:
         # Simulate receiving SIGINT (this sets _shutdown_in_progress = True)
         signal_handler(signal.SIGINT, None)
         
+        # Verify shutdown flag is set
+        assert log_manager._shutdown_in_progress is True
+        
         # Try to start a new HDFS operation - should fail
         with pytest.raises(ValueError, match="LogManager is shutting down"):
             log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+
+
+@patch('utilities.logger.os.kill')
+@patch('utilities.logger.signal.signal')
+class TestSignalHandlerEdgeCases:
+    """Test edge cases and error conditions in signal handling."""
+
+    def test_multiple_signals_handled_gracefully(self, mock_signal_signal, mock_os_kill, mock_logger, log_manager):
+        """Test that multiple signals in quick succession are handled properly."""
+        # Setup signal handler
+        log_manager._setup_signal_handlers()
+        signal_handler = mock_signal_signal.call_args_list[0][0][1]
+        
+        # Simulate receiving first signal
+        signal_handler(signal.SIGINT, None)
+        
+        # Reset mock for second signal
+        mock_os_kill.reset_mock()
+        
+        # Simulate receiving second signal - should be handled gracefully
+        signal_handler(signal.SIGTERM, None)
+        
+        # Verify second signal was also re-raised
+        mock_os_kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
+
+    @patch('utilities.logger.LogManager._cleanup')
+    def test_signal_handler_cleanup_exception_handling(self, mock_cleanup, mock_signal_signal, mock_os_kill, mock_logger, log_manager):
+        """Test that signal handler propagates cleanup exceptions."""
+        # Make cleanup raise an exception
+        mock_cleanup.side_effect = Exception("Cleanup failed")
+        
+        # Setup signal handler
+        log_manager._setup_signal_handlers()
+        signal_handler = mock_signal_signal.call_args_list[0][0][1]
+        
+        # Simulate receiving signal - should raise the cleanup exception
+        with pytest.raises(Exception, match="Cleanup failed"):
+            signal_handler(signal.SIGINT, None)
+        
+        # Verify cleanup was attempted
+        mock_cleanup.assert_called_once()
+        
+        # Verify signal restoration and re-raising didn't occur due to exception
+        mock_os_kill.assert_not_called()
