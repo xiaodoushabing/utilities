@@ -94,7 +94,9 @@ class TestDuplicateFileWarnings:
         log_manager._copy_operations_files["copy1"] = {"/tmp/app.log"}
         log_manager._copy_operations_files["copy2"] = {"/tmp/error.log"}
         
-        log_manager._cleanup()
+        # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+            log_manager._cleanup()
         
         # File tracking should be cleared
         assert len(log_manager._copy_operations_files) == 0

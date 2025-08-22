@@ -112,6 +112,203 @@ class TestHDFSCopyLifecycle:
         assert copy_name not in log_manager._hdfs_copy_threads
         assert copy_name not in log_manager._stop_events
 
+
+class TestCopyOperationParameterStorage:
+    """Test parameter storage and retrieval for HDFS copy operations."""
+    
+    def test_start_hdfs_copy_stores_parameters(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test that start_hdfs_copy stores operation parameters correctly."""
+        copy_name = hdfs_copy_defaults["copy_name"]
+        
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Verify parameters are stored
+        assert copy_name in log_manager._copy_operations_params
+        stored_params = log_manager._copy_operations_params[copy_name]
+        
+        # Check all expected parameters are stored
+        expected_params = {
+            'path_patterns': hdfs_copy_defaults['path_patterns'],
+            'hdfs_destination': hdfs_copy_defaults['hdfs_destination'],
+            'create_dest_dirs': hdfs_copy_defaults.get('create_dest_dirs', True),
+            'preserve_structure': hdfs_copy_defaults.get('preserve_structure', False),
+            'root_dir': hdfs_copy_defaults.get('root_dir', None),
+            'max_retries': hdfs_copy_defaults.get('max_retries', 3),
+            'retry_delay': hdfs_copy_defaults.get('retry_delay', 5)
+        }
+        
+        assert stored_params == expected_params
+    
+    def test_stop_hdfs_copy_removes_parameters(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test that stop_hdfs_copy removes stored parameters."""
+        copy_name = hdfs_copy_defaults["copy_name"]
+        
+        # Start and verify parameters are stored
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        assert copy_name in log_manager._copy_operations_params
+        
+        # Stop and verify parameters are removed
+        log_manager.stop_hdfs_copy(copy_name)
+        assert copy_name not in log_manager._copy_operations_params
+    
+    def test_cleanup_clears_all_parameters(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test that cleanup clears all stored parameters."""
+        # Start multiple operations
+        for i in range(3):
+            params = {**hdfs_copy_defaults, "copy_name": f"copy{i}"}
+            log_manager.start_hdfs_copy(**params)
+        
+        # Verify parameters are stored
+        assert len(log_manager._copy_operations_params) == 3
+        
+        # Mock trigger to prevent hanging during cleanup
+        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+            log_manager._cleanup()
+        
+        # Verify all parameters are cleared
+        assert len(log_manager._copy_operations_params) == 0
+    
+    def test_parameter_storage_with_custom_values(self, mock_thread, mock_event, log_manager):
+        """Test parameter storage with custom non-default values."""
+        custom_params = {
+            "copy_name": "custom_test",
+            "path_patterns": ["/custom/*.log", "/other/*.txt"],
+            "hdfs_destination": "hdfs://custom/dest/",
+            "root_dir": "/custom/root",
+            "copy_interval": 120,
+            "create_dest_dirs": False,
+            "preserve_structure": True,
+            "max_retries": 5,
+            "retry_delay": 10
+        }
+        
+        log_manager.start_hdfs_copy(**custom_params)
+        
+        stored_params = log_manager._copy_operations_params["custom_test"]
+        
+        # Verify custom values are stored correctly (excluding copy_interval which isn't stored)
+        expected_stored = {
+            'path_patterns': ["/custom/*.log", "/other/*.txt"],
+            'hdfs_destination': "hdfs://custom/dest/",
+            'create_dest_dirs': False,
+            'preserve_structure': True,
+            'root_dir': "/custom/root",
+            'max_retries': 5,
+            'retry_delay': 10
+        }
+        
+        assert stored_params == expected_stored
+
+
+class TestTriggerHDFSCopyNow:
+    """Test manual trigger functionality for HDFS copy operations."""
+    
+    def test_trigger_single_operation(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test triggering a specific HDFS copy operation."""
+        copy_name = hdfs_copy_defaults["copy_name"]
+        
+        # Start operation
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Mock the _perform_copy_operation method to verify it's called
+        with patch.object(log_manager, '_perform_copy_operation') as mock_perform:
+            log_manager.trigger_hdfs_copy_now(copy_name)
+            
+            # Verify _perform_copy_operation was called with correct parameters
+            mock_perform.assert_called_once_with(
+                copy_name,
+                hdfs_copy_defaults['path_patterns'],
+                hdfs_copy_defaults['hdfs_destination'],
+                hdfs_copy_defaults.get('create_dest_dirs', True),
+                hdfs_copy_defaults.get('preserve_structure', False),
+                hdfs_copy_defaults.get('root_dir', None),
+                hdfs_copy_defaults.get('max_retries', 3),
+                hdfs_copy_defaults.get('retry_delay', 5)
+            )
+    
+    def test_trigger_all_operations(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test triggering all active HDFS copy operations."""
+        # Start multiple operations
+        operation_names = ["op1", "op2", "op3"]
+        for name in operation_names:
+            params = {**hdfs_copy_defaults, "copy_name": name}
+            log_manager.start_hdfs_copy(**params)
+        
+        # Mock the _perform_copy_operation method
+        with patch.object(log_manager, '_perform_copy_operation') as mock_perform:
+            log_manager.trigger_hdfs_copy_now()  # No specific copy_name = trigger all
+            
+            # Verify _perform_copy_operation was called for each operation
+            assert mock_perform.call_count == 3
+            
+            # Verify each operation was called with its stored parameters
+            called_names = [call[0][0] for call in mock_perform.call_args_list]
+            assert set(called_names) == set(operation_names)
+    
+    def test_trigger_nonexistent_operation_raises_error(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test that triggering a non-existent operation raises ValueError."""
+        # Start one operation so that _hdfs_copy_threads is not empty
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Now trying to trigger a nonexistent operation should raise ValueError
+        with pytest.raises(ValueError, match="does not exist"):
+            log_manager.trigger_hdfs_copy_now("nonexistent_copy")
+    
+    def test_trigger_with_no_active_operations(self, log_manager, capsys):
+        """Test triggering when no operations are active."""
+        log_manager.trigger_hdfs_copy_now()
+        
+        captured = capsys.readouterr()
+        assert "No active HDFS copy operations to trigger" in captured.out
+    
+    def test_trigger_handles_operation_exceptions(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults, capsys):
+        """Test that trigger handles exceptions in individual operations gracefully."""
+        copy_name = hdfs_copy_defaults["copy_name"]
+        
+        # Start operation
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Mock _perform_copy_operation to raise an exception
+        with patch.object(log_manager, '_perform_copy_operation', side_effect=Exception("Copy error")):
+            log_manager.trigger_hdfs_copy_now(copy_name)
+            
+            # Verify error is logged but doesn't crash
+            captured = capsys.readouterr()
+            assert "Exception occured during manually-triggered copy operation" in captured.out
+            assert copy_name in captured.out
+            assert "Copy error" in captured.out
+    
+    def test_trigger_uses_stored_parameters_correctly(self, mock_thread, mock_event, log_manager):
+        """Test that trigger uses the exact parameters that were stored during start."""
+        custom_params = {
+            "copy_name": "param_test",
+            "path_patterns": ["/test/*.log"],
+            "hdfs_destination": "hdfs://test/dest/",
+            "root_dir": "/test/root",
+            "create_dest_dirs": False,
+            "preserve_structure": True,
+            "max_retries": 7,
+            "retry_delay": 15
+        }
+        
+        log_manager.start_hdfs_copy(**custom_params)
+        
+        with patch.object(log_manager, '_perform_copy_operation') as mock_perform:
+            log_manager.trigger_hdfs_copy_now("param_test")
+            
+            # Verify the exact stored parameters were used
+            mock_perform.assert_called_once_with(
+                "param_test",
+                ["/test/*.log"],
+                "hdfs://test/dest/",
+                False,  # create_dest_dirs
+                True,   # preserve_structure
+                "/test/root",  # root_dir
+                7,      # max_retries
+                15      # retry_delay
+            )
+
+
 class TestFileDiscovery:
     """Test file discovery functionality."""
     
@@ -348,11 +545,19 @@ class TestCleanup:
         params2 = {**hdfs_copy_defaults, "copy_name": copy_name2}
         log_manager.start_hdfs_copy(**params2)
         
+        # Verify parameters are stored before cleanup
+        assert len(log_manager._copy_operations_params) == 2
+        assert copy_name1 in log_manager._copy_operations_params
+        assert copy_name2 in log_manager._copy_operations_params
+        
         mock_logger.remove.reset_mock()
-        log_manager._cleanup()
+        # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+            log_manager._cleanup()
         
         assert len(log_manager._hdfs_copy_threads) == 0
         assert len(log_manager._stop_events) == 0
+        assert len(log_manager._copy_operations_params) == 0  # Verify parameters are cleared
         mock_logger.remove.assert_called_once()
 
     @pytest.mark.parametrize("failed_ops", [
@@ -364,7 +569,9 @@ class TestCleanup:
         
         # mock stop_all_hdfs_copy to return failed operations
         with patch.object(log_manager, 'stop_all_hdfs_copy', return_value=failed_ops) as mock_stop_all:
-            log_manager._cleanup()
+            # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+            with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+                log_manager._cleanup()
             
             # Verify cleanup still completes even with failed operations
             mock_stop_all.assert_called_once()
@@ -394,3 +601,56 @@ class TestCleanup:
         # State should remain consistent
         assert log_manager._shutdown_in_progress is True
         assert len(log_manager._hdfs_copy_threads) == 0
+
+    def test_cleanup_calls_trigger_before_stopping_operations(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults):
+        """Test that cleanup calls trigger_hdfs_copy_now before stopping operations."""
+        # Start operations
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Track the order of calls
+        call_order = []
+        
+        def mock_trigger():
+            call_order.append("trigger")
+        
+        def mock_stop_all(*args, **kwargs):
+            call_order.append("stop_all")
+            return []  # No failed operations
+        
+        with patch.object(log_manager, 'trigger_hdfs_copy_now', side_effect=mock_trigger):
+            with patch.object(log_manager, 'stop_all_hdfs_copy', side_effect=mock_stop_all):
+                log_manager._cleanup()
+        
+        # Verify trigger was called before stop_all
+        assert call_order == ["trigger", "stop_all"]
+    
+    def test_cleanup_skips_trigger_when_no_operations(self, log_manager, capsys):
+        """Test that cleanup skips trigger when no HDFS operations are active."""
+        # No operations started
+        assert len(log_manager._hdfs_copy_threads) == 0
+        
+        with patch.object(log_manager, 'trigger_hdfs_copy_now') as mock_trigger:
+            log_manager._cleanup()
+            
+            # Trigger should not be called when no operations exist
+            mock_trigger.assert_not_called()
+    
+    def test_cleanup_proceeds_despite_trigger_exception(self, mock_thread, mock_event, log_manager, hdfs_copy_defaults, capsys):
+        """Test that cleanup continues even if trigger_hdfs_copy_now raises an exception."""
+        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+        
+        # Mock trigger to raise exception
+        with patch.object(log_manager, 'trigger_hdfs_copy_now', side_effect=Exception("Trigger failed")):
+            with patch.object(log_manager, 'stop_all_hdfs_copy') as mock_stop:
+                # Cleanup should not crash despite trigger exception
+                log_manager._cleanup()
+                
+                # Verify stop_all was still called after the trigger exception
+                mock_stop.assert_called_once()
+                
+                # Verify shutdown flag is still set
+                assert log_manager._shutdown_in_progress is True
+                
+                # Verify warning message was printed
+                captured = capsys.readouterr()
+                assert "Warning: Final HDFS copy failed during cleanup: Trigger failed" in captured.out

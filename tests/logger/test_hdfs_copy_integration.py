@@ -33,8 +33,10 @@ class TestMultipleOperations:
         
         assert len(log_manager._hdfs_copy_threads) == 2
         
-        # Cleanup should stop everything
-        log_manager._cleanup()
+        # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+            # Cleanup should stop everything
+            log_manager._cleanup()
         
         assert len(log_manager._hdfs_copy_threads) == 0
         assert len(log_manager._stop_events) == 0
@@ -53,18 +55,27 @@ class TestCleanupIntegration:
         log_manager._handlers_map["test_handler"] = {"id": "123"}
         log_manager._loggers_map["test_logger"] = [{"handler": "test_handler", "level": "INFO"}]
         log_manager._copy_operations_files["test_op"] = {"/tmp/test.log"}
+        log_manager._copy_operations_params["test_op"] = {"path_patterns": ["/tmp/*.log"]}
         
-        # Call cleanup
-        log_manager._cleanup(hdfs_timeout=30.0)
+        # Add a mock thread to trigger the trigger_hdfs_copy_now call
+        mock_thread = MagicMock()
+        log_manager._hdfs_copy_threads["test_op"] = mock_thread
+        
+        # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+        with patch.object(log_manager, 'trigger_hdfs_copy_now') as mock_trigger:
+            # Call cleanup
+            log_manager._cleanup(hdfs_timeout=30.0)
         
         # Verify all cleanup operations were performed
         mock_stop_all.assert_called_once_with(timeout=30.0, verbose=True)
         mock_logger_remove.assert_called_once()
+        mock_trigger.assert_called_once()  # Should be called since we have threads
         
         # Verify all internal state was cleared
         assert len(log_manager._handlers_map) == 0
         assert len(log_manager._loggers_map) == 0
         assert len(log_manager._copy_operations_files) == 0
+        assert len(log_manager._copy_operations_params) == 0
         assert log_manager._shutdown_in_progress is True
         
         # Verify proper logging occurred
@@ -103,8 +114,10 @@ class TestConcurrentOperations:
         
         # Mock the worker to raise an exception during operation
         with patch.object(log_manager, '_discover_files_to_copy', side_effect=Exception("Worker error")):
-            # Cleanup should still work despite worker exceptions
-            log_manager._cleanup()
+            # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+            with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+                # Cleanup should still work despite worker exceptions
+                log_manager._cleanup()
             
             assert log_manager._shutdown_in_progress is True
             assert len(log_manager._hdfs_copy_threads) == 0
@@ -124,9 +137,13 @@ class TestConcurrentOperations:
             operations = log_manager.list_hdfs_copy_operations()
             assert len(operations) == 2
             
-            # Cleanup should stop both operations
-            log_manager._cleanup()
-            assert len(log_manager._hdfs_copy_threads) == 0
+            # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
+            with patch.object(log_manager, 'trigger_hdfs_copy_now') as mock_trigger:
+                # Cleanup should stop both operations
+                log_manager._cleanup()
+                assert len(log_manager._hdfs_copy_threads) == 0
+                # Verify trigger was called during cleanup
+                mock_trigger.assert_called_once()
 
 
 class TestSignalIntegration:
