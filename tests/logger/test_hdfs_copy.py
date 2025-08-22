@@ -374,7 +374,7 @@ class TestCleanup:
         assert log_manager._shutdown_in_progress is True
 
 
-    def test_cleanup_idempotency(self, mock_event, mock_logger, log_manager, hdfs_copy_defaults, mock_thread):
+    def test_cleanup_idempotency(self, mock_event, log_manager, hdfs_copy_defaults, mock_thread):
         """Test that cleanup can be called multiple times safely."""
         # Start an HDFS operation
         log_manager.start_hdfs_copy(**hdfs_copy_defaults)

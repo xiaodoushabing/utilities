@@ -47,7 +47,7 @@ class TestCleanupIntegration:
     @patch('utilities.logger.LogManager.stop_all_hdfs_copy')
     @patch('utilities.logger.logger.remove')
     @patch('builtins.print')
-    def test_cleanup_performs_all_operations(self, mock_print, mock_logger_remove, mock_stop_all, mock_atexit, mock_logger, log_manager):
+    def test_cleanup_performs_all_operations(self, mock_print, mock_logger_remove, mock_stop_all, mock_atexit, log_manager):
         """Test that cleanup performs all required cleanup operations."""
         # Add some state to cleanup
         log_manager._handlers_map["test_handler"] = {"id": "123"}

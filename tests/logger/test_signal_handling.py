@@ -69,7 +69,7 @@ class TestSignalHandlerBehavior:
     ])
     @patch('builtins.print')
     @patch('utilities.logger.LogManager._cleanup')
-    def test_signal_handler_calls_cleanup_and_reraises(self, mock_cleanup, mock_print, mock_signal_signal, mock_os_kill, mock_logger, log_manager, sig):
+    def test_signal_handler_calls_cleanup_and_reraises(self, mock_cleanup, mock_print, mock_signal_signal, mock_os_kill, log_manager, sig):
         """Test that signal handler performs cleanup and re-raises signal."""
         # Mock the cleanup method
         log_manager._setup_signal_handlers()
@@ -116,7 +116,7 @@ class TestSignalHandlerBehavior:
         mock_os_kill.assert_called_once_with(os.getpid(), signal.SIGINT)
     
 
-    def test_signal_handler_prevents_new_hdfs_operations(self, mock_signal_signal, mock_os_kill, mock_logger, log_manager, hdfs_copy_defaults):
+    def test_signal_handler_prevents_new_hdfs_operations(self, mock_signal_signal, mock_os_kill, log_manager, hdfs_copy_defaults):
         """Test that signal handler prevents new HDFS operations after cleanup."""
         # Get the signal handler and simulate signal
         log_manager._setup_signal_handlers()
@@ -138,7 +138,7 @@ class TestSignalHandlerBehavior:
 class TestSignalHandlerEdgeCases:
     """Test edge cases and error conditions in signal handling."""
 
-    def test_multiple_signals_handled_gracefully(self, mock_signal_signal, mock_os_kill, mock_logger, log_manager):
+    def test_multiple_signals_handled_gracefully(self, mock_signal_signal, mock_os_kill, log_manager):
         """Test that multiple signals in quick succession are handled properly."""
         # Setup signal handler
         log_manager._setup_signal_handlers()
@@ -157,7 +157,7 @@ class TestSignalHandlerEdgeCases:
         mock_os_kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
 
     @patch('utilities.logger.LogManager._cleanup')
-    def test_signal_handler_cleanup_exception_handling(self, mock_cleanup, mock_signal_signal, mock_os_kill, mock_logger, log_manager):
+    def test_signal_handler_cleanup_exception_handling(self, mock_cleanup, mock_signal_signal, mock_os_kill, log_manager):
         """Test that signal handler propagates cleanup exceptions."""
         # Make cleanup raise an exception
         mock_cleanup.side_effect = Exception("Cleanup failed")
