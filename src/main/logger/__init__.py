@@ -74,16 +74,74 @@ class LogManager:
         self._setup_logger()
 
         # HDFS copy management
-        self._hdfs_copy_threads = {}            # thread_name -> thread object
-        self._stop_events = {}                  # thread_name -> threading.Event
-        self._copy_operations_files = {}        # copy_name -> set of files being copied
-        self._copy_operations_params = {}       # copy_name -> copy parameters dict
-        self._shutdown_in_progress = False      # flag to prevent new copy operations during shutdown
-        self._setup_signal_handlers()           # setup signal handlers for graceful shutdown
+        self._hdfs_copy_threads = {}                                                # thread_name -> thread object
+        self._stop_events = {}                                                      # thread_name -> threading.Event
+        self._copy_operations_files = {}                                            # copy_name -> set of files being copied
+        self._copy_operations_params = {}                                           # copy_name -> copy parameters dict
+        self._shutdown_in_progress = False                                          # flag to prevent new copy operations during shutdown
+        self._hdfs_copy_enabled = self._check_distributed_hdfs_coordination()       # Distributed system coordination
+        self._setup_signal_handlers()                                               # setup signal handlers for graceful shutdown
 
         # teardown
         atexit.register(self._cleanup)
     
+    ## ------------------------------ SIMPLE HDFS COORDINATION ------------------------------ ##
+
+    def _check_distributed_hdfs_coordination(self) -> bool:
+        """
+        Simple check if HDFS copy should be enabled using environment variables.
+        
+        Environment Variables:
+            DISABLE_HDFS_COPY: Set to 'true' to disable HDFS copy
+        
+        Perfect for distributed systems like Ray, Spark, Kubernetes where you can
+        set environment variables per node:
+        - Coordinator/head nodes: No environment variable (enabled by default)
+        - Worker nodes: DISABLE_HDFS_COPY=true
+        
+        Returns:
+            bool: True if HDFS copy should be enabled, False otherwise.
+        """
+        enabled = self._should_run_hdfs_copy()
+        
+        if not enabled:
+            print("HDFS copy disabled via DISABLE_HDFS_COPY environment variable")
+        else:
+            print("HDFS copy enabled (default behavior)")
+        
+        return enabled
+
+    def _should_run_hdfs_copy(self) -> bool:
+        """
+        Check if HDFS copy should be enabled based on environment variables.
+        
+        Environment Variables:
+            DISABLE_HDFS_COPY: Set to 'true' to disable HDFS copy
+        
+        Perfect for distributed systems:
+        - Coordinator/head nodes: No environment variable (enabled by default)
+        - Worker nodes: DISABLE_HDFS_COPY=true
+        
+        Returns:
+            bool: True if HDFS copy should be enabled, False otherwise.
+        """
+        return os.getenv('DISABLE_HDFS_COPY', '').lower() != 'true'
+    
+    def get_hdfs_copy_status(self) -> dict:
+        """
+        Get current HDFS copy status and environment information.
+        
+        Returns:
+            dict: Status information including enabled state and reason.
+        """
+        disable_hdfs = os.getenv('DISABLE_HDFS_COPY', '')
+        
+        return {
+            'hdfs_copy_enabled': self._hdfs_copy_enabled,
+            'reason': 'DISABLE_HDFS_COPY=true' if disable_hdfs.lower() == 'true' else 'Default behavior (enabled)',
+            'environment_variable': {'DISABLE_HDFS_COPY': disable_hdfs}
+        }
+
     ## ------------------------------ SETUP SIGNAL HANDLERS ------------------------------ ##
 
     def _setup_signal_handlers(self):
@@ -539,6 +597,12 @@ class LogManager:
             raise ValueError("copy_name cannot be empty")
         if self._shutdown_in_progress:
             raise ValueError("Cannot start new HDFS copy operations: LogManager is shutting down")
+
+        # Check HDFS copy enablement
+        if not self._hdfs_copy_enabled:
+            print(f"HDFS copy operation '{copy_name}' skipped: disabled in distributed system environment")
+            return
+        
         if copy_name in self._hdfs_copy_threads:
             raise ValueError(f"HDFS copy operation '{copy_name}' already exists. Use stop_hdfs_copy() first.")
         if not path_patterns:
