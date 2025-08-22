@@ -165,34 +165,55 @@ with patch('utilities.logger.threading.Event') as mock_event:
 
 #### When You Need Explicit `MagicMock()` vs Auto-Mock
 
+When you use `patch()`, it automatically creates a `MagicMock` object. You have two options for configuring the mock's behavior:
+
+1. **Auto-mock**: Use the automatically created `MockClass.return_value` 
+2. **Explicit MagicMock**: Create your own `MagicMock()` instance for custom control
+
 **Auto-mock is sufficient** (simpler):
 ```python
-# patch() already returns a MagicMock with auto-generated return values
+# patch() creates MockThread as a MagicMock that replaces the Thread class
 with patch('utilities.logger.threading.Thread') as MockThread:
-    # MockThread.return_value is automatically a MagicMock
-    MockThread.return_value.start.return_value = None
-    MockThread.return_value.is_alive.return_value = True
+    # MockThread.return_value is automatically another MagicMock representing a Thread instance
+    # Configure the instance methods directly
+    MockThread.return_value.start.return_value = None      # Mock start() method
+    MockThread.return_value.is_alive.return_value = True   # Mock is_alive() method
+    
+    # When code calls: thread = Thread(); thread.start()
+    # It actually calls: MockThread(); MockThread.return_value.start()
+```
+*In practice:*
+```python
+# Original code that gets mocked:
+thread = threading.Thread(target=some_function)  # This calls MockThread()
+thread.start()     # This calls MockThread.return_value.start()
+thread.is_alive()  # This calls MockThread.return_value.is_alive()
 ```
 
 **Explicit MagicMock needed** (complex behavior):
 ```python
 # From our conftest.py - when you need custom behavior
 with patch('utilities.logger.threading.Thread') as mock_thread:
-    mock_thread_instance = MagicMock()  # ← Needed for custom logic
+    # Create your own MagicMock instance for full control
+    mock_thread_instance = MagicMock()  # ← Explicit creation for custom logic
     
     def create_mock_thread(*args, **kwargs):
-        # Custom configuration based on arguments
+        # Custom configuration based on constructor arguments
         mock_thread_instance.name = kwargs.get('name', 'MockThread')
         mock_thread_instance.daemon = kwargs.get('daemon', False)
         mock_thread_instance.is_alive.return_value = True
         
+        # Create stateful behavior - join() changes is_alive() result
         def mock_join(timeout=None):
             mock_thread_instance.is_alive.return_value = False
         
         mock_thread_instance.join.side_effect = mock_join
-        return mock_thread_instance
+        return mock_thread_instance  # Return the same instance each time
     
-    mock_thread.side_effect = create_mock_thread  # Custom creation logic
+    # Replace the default behavior with custom creation logic
+    mock_thread.side_effect = create_mock_thread
+    
+    # Now when code calls Thread(name='worker'), it uses our custom logic
 ```
 
 **Use explicit MagicMock when you need**:
@@ -200,6 +221,12 @@ with patch('utilities.logger.threading.Thread') as mock_thread:
 - Stateful behavior (like the join/is_alive interaction above)
 - Shared references to the same mock instance
 - Complex side effects
+
+**Key Difference Explained**:
+- **Auto-mock**: `MockThread.return_value` is automatically a `MagicMock` - simple configuration
+- **Explicit MagicMock**: You create `mock_instance = MagicMock()` - full control over behavior
+
+In both cases, `MockThread` itself is a `MagicMock` that replaces the Thread class constructor. The difference is how you configure what gets returned when that constructor is called.
 
 **When to use**:
 - Avoiding real threading in tests
