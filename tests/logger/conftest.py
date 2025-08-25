@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
 from utilities import LogManager
+from utilities.logger import LoggingManager, CopyManager, DistributedCoordinator
 
 
 # ========================================================================================
@@ -55,7 +56,7 @@ def mock_logger():
     """
     # PATCH: Temporarily replace 'logmanager.logger' with a fake object
     # patch() swaps out the real Loguru logger with a controllable test double
-    with patch('utilities.logger.logger') as mock:  # Replace real logger with fake one
+    with patch('utilities.logger._logging_manager.logger') as mock:  # Replace real logger with fake one
         
         # MAGICMOCK: Fake objects that automatically provide any method/attribute
         # When code calls mock.some_method(), MagicMock pretends it exists and records the call
@@ -112,38 +113,33 @@ def default_config():
 # ========================================================================================
 
 @pytest.fixture
-def log_manager(mock_logger, default_config):
+def logging_manager(mock_logger, default_config):
     """
-    🏭 Basic LogManager for unit testing.
+    🏭 Basic LoggingManager for unit testing.
 
-    Uses default config - tests can create their own LogManager with
+    Uses default config - tests can create their own LoggingManager with
     specific configs when needed.
-    
+
     🔍 WHAT HAPPENS HERE:
-    1. LogManager() called with NO config_path parameter
-    2. LogManager sets self._config_path = DEFAULT_CONFIG_PATH
-    3. LogManager tries to open(DEFAULT_CONFIG_PATH, 'r')  
+    1. LoggingManager() called with NO config_path parameter
+    2. LoggingManager sets self._config_path = DEFAULT_CONFIG_PATH
+    3. LoggingManager tries to open(DEFAULT_CONFIG_PATH, 'r')  
     4. But our mock intercepts and returns default_config instead!
 
     So it's reading from DEFAULT path, but getting FAKE content.
     """
-    # mock_logger is needed to patch logger.remove() calls during LogManager init
-    
-    # MOCK FILE READING: Replace real file operations with fake data
-    # patch('builtins.open') temporarily replaces Python's open() with a fake version during testing.
+    # mock_logger is needed to patch logger.remove() calls during LoggingManager init
     with patch('builtins.open', mock_open(read_data=yaml.dump(default_config))):
-        # When LogManager calls open(DEFAULT_CONFIG_PATH, 'r'), it gets our fake default_config
-        # converted to YAML string instead of reading the real default config file
-        return LogManager()  # ← NO config_path = uses DEFAULT_CONFIG_PATH
+        return LoggingManager()  # ← NO config_path = uses DEFAULT_CONFIG_PATH
 
 # ========================================================================================
-# HDFS COPY TEST FIXTURES
+# COPY TEST FIXTURES
 # ========================================================================================
 
 @pytest.fixture
 def mock_file_discovery():
     """
-    Mock file discovery to return predictable results for HDFS copy testing.
+    Mock file discovery to return predictable results for copy testing.
     
     - Replaces LogManager._discover_files_to_copy with controllable mock
     - Allows tests to control which files are "discovered"
@@ -156,21 +152,21 @@ def mock_file_discovery():
         yield mock
 
 @pytest.fixture
-def hdfs_copy_defaults():
+def copy_defaults():
     """
-    📦 Default parameters for HDFS copy testing.
+    📦 Default parameters for copy testing.
     
     Provides a complete set of valid default parameters that can be 
     merged with test-specific invalid parameters to test validation.
     
     Usage: 
-        params = {**hdfs_copy_defaults, **invalid_params}
-        log_manager.start_hdfs_copy(**params)
+        params = {**copy_defaults, **invalid_params}
+        log_manager.start_copy(**params)
     """
     return {
         "copy_name": "test",
         "path_patterns": ["/tmp/*_log.txt"],
-        "hdfs_destination": "hdfs://dest/",
+        "copy_destination": "hdfs://dest/",
         "root_dir": None,
         "copy_interval": 60,
         "create_dest_dirs": True,
@@ -182,7 +178,7 @@ def hdfs_copy_defaults():
 @pytest.fixture
 def sample_log_files(temp_dir):
     """
-    Create sample log files for HDFS copy testing.
+    Create sample log files for copy testing.
     
     Creates 3 test log files with content.
 
@@ -210,7 +206,7 @@ def mock_thread():
            mock_thread.start.assert_called_once()
            mock_thread.join.assert_called_once()
     """
-    with patch('utilities.logger.threading.Thread') as mock_thread:
+    with patch('utilities.logger._copy_manager.threading.Thread') as mock_thread:
         # Create a single mock instance that will be returned for all calls
         mock_thread_instance = MagicMock()
         
@@ -246,7 +242,7 @@ def mock_event():
            mock_event.return_value.set.assert_called_once()
            mock_event.return_value.wait.assert_called_once()
     """
-    with patch('utilities.logger.threading.Event') as mock_event:
+    with patch('utilities.logger._copy_manager.threading.Event') as mock_event:
         mock_event_instance = MagicMock()
         
         # Create a state variable to track if the event is set
@@ -274,4 +270,3 @@ def mock_event():
         mock_event.return_value = mock_event_instance
         
         yield mock_event
-
