@@ -313,9 +313,10 @@ class CopyManager:
             return
             
         if copy_name is not None:
-            if copy_name not in self._copy_threads:
-                raise ValueError(f"Copy operation '{copy_name}' does not exist")
-            copy_names = [copy_name]
+            for name in copy_name:
+                if name not in self._copy_threads:
+                    raise ValueError(f"Copy operation '{name}' does not exist")
+            copy_names = copy_name
         else:
             copy_names = list(self._copy_threads.keys())
             
