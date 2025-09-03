@@ -4,7 +4,7 @@ from ._base import BaseFileIO
 from .._aux import retry_args
 
 from upath import UPath
-from typing import Union, Optional, Any, overload
+from typing import Union, Optional, Any, Union, bool, overload
 from pandas import DataFrame
 
 class FileIOInterface:
@@ -24,6 +24,22 @@ class FileIOInterface:
         upath_obj: UPath = UPath(fpath, protocol=filesystem)
         fileio: BaseFileIO = BaseFileIO(upath_obj=upath_obj, *args, **kwargs)
         return fileio
+
+    @staticmethod
+    @retry_args
+    def fexists(fpath: str, filesystem: Optional[str] = None, *args, **kwargs) -> bool:
+        """
+        Check if a file exists at the specified path.
+
+        Args:
+            fpath (str): File path to check.
+            filesystem (Optional[str]): Filesystem type, if any. Defaults to None.
+
+        Returns:
+            bool: True if the file exists, False otherwise.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath, filesystem, *args, **kwargs)
+        return fileio._fexists(*args, **kwargs)
 
     @staticmethod
     @retry_args
@@ -69,7 +85,7 @@ class FileIOInterface:
             filesystem (Optional[str]): Filesystem type, if any.
         """
         fileio: BaseFileIO = __class__._instantiate(fpath=read_path, filesystem=filesystem, *args, **kwargs)
-        return fileio._copy(dest_path=dest_path, *args, **kwargs)
+        return fileio._fcopy(dest_path=dest_path, *args, **kwargs)
     
     @staticmethod
     @overload

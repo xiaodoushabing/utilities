@@ -45,6 +45,12 @@ class BaseFileIO:
         # Validate and cache the file extension during initialization
         self.file_extension = self._validate_file_extension()
 
+    def _fexists(self, *args, **kwargs) -> bool:
+        """
+        Check if the file exists.
+        """
+        return self.upath.exists()
+
     def _finfo(self, *args, **kwargs) -> dict:
         """
         Get file information.
@@ -69,7 +75,8 @@ class BaseFileIO:
         if not file_extension:
             raise ValueError(f"File {self.upath.path} has no extension")
         if file_extension not in fileio_mapping:
-            raise ValueError(f"Unsupported file format: .{file_extension}. Supported formats: {list(fileio_mapping.keys())}")
+            raise ValueError(f"Unsupported file format: .{file_extension}.\n"
+                             f"Supported formats: {list(fileio_mapping.keys())}")
         return file_extension
 
     def _fread(self, *args, **kwargs) -> object:
@@ -89,7 +96,7 @@ class BaseFileIO:
         file_io_cls = fileio_mapping[self.file_extension]
         return file_io_cls._read(data)
     
-    def _copy(self, dest_path: str, *args, **kwargs) -> None:
+    def _fcopy(self, dest_path: str, *args, **kwargs) -> None:
         """
         Copy the file to a new location.
         
