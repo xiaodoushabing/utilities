@@ -176,22 +176,22 @@ class BaseFileIO:
         elif file_extension in serializable_formats:
             pass  # JSON, YAML, and Pickle can handle various serializable types
         
-    def _fmakedirs(self, dirpath: str, exist_ok: bool = True, *args, **kwargs) -> None:
-        """
-        Create directories for the file path recursively.
+    # def _fmakedirs(self, dirpath: str, exist_ok: bool = True, *args, **kwargs) -> None:
+    #     """
+    #     Create directories for the file path recursively.
         
-        Args:
-            dirpath (str): Directory path to create.
-            exist_ok (bool): If True, do not raise an error if the directory already exists.
+    #     Args:
+    #         dirpath (str): Directory path to create.
+    #         exist_ok (bool): If True, do not raise an error if the directory already exists.
 
-        Raises:
-            OSError: If the directory cannot be created.
-        """
-        try:
-            self.upath.fs.makedirs(dirpath, exist_ok=exist_ok, *args, **kwargs)
-        except OSError as e:
-            warnings.warn(f"Failed to create directories for {dirpath}: {e}")
-            raise e
+    #     Raises:
+    #         OSError: If the directory cannot be created.
+    #     """
+    #     try:
+    #         self.upath.fs.makedirs(dirpath, exist_ok=exist_ok, *args, **kwargs)
+    #     except OSError as e:
+    #         warnings.warn(f"Failed to create directories for {dirpath}: {e}")
+    #         raise e
 
     def _fdelete(self, filepath: str, *args, **kwargs) -> None:
         """

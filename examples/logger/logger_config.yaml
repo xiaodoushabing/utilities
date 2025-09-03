@@ -6,7 +6,7 @@ formats:
 # define handlers
 handlers:
   handler_file:
-    sink: "./logs/.logs"
+    sink: "./logs/test.log"
     format: "simple"
     level: "DEBUG"
     # retention: "30 days"
@@ -20,21 +20,32 @@ handlers:
 
 # define logging tasks
 loggers:
-  default_task:
+  logger_a:
     - handler: "handler_file"
-      level: "DEBUG"
+      level: "WARNING"
     - handler: "handler_console"
       level: "DEBUG"
-
+  logger_b:
+    - handler: "handler_console"
+      level: "INFO"
 # =================================================
 # COPY MANAGEMENT
 # =================================================
 copy_manager:
   test_copy_1: #copy_name
     path_patterns: "./logs/**"
-    copy_destination: "./logs_copy/"
-    # root_dir: 
-    copy_interval: 300 # seconds
+    copy_destination: "./logs_copy_1/"
+    root_dir: "./logs/"
+    copy_interval: 5 # seconds
+    create_dest_dirs: true
+    preserve_structure: true
+    max_retries: 3
+    retry_delay: 5
+  test_copy_2:
+    path_patterns: "./logs/test.log"
+    copy_destination: "./logs_copy_2/"
+    # root dir:
+    copy_interval: 5
     create_dest_dirs: true
     preserve_structure: false
     max_retries: 3

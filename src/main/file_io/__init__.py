@@ -3,6 +3,7 @@ import fsspec
 from ._base import BaseFileIO
 from .._aux import retry_args
 
+import warnings
 from upath import UPath
 from typing import Union, Optional, Any, Union, overload
 class FileIOInterface:
@@ -137,9 +138,21 @@ class FileIOInterface:
             path (str): Path to create directories at.
             filesystem (Optional[str]): Filesystem type, if any.
             exist_ok (bool): If True, do not raise an error if the directory already exists.
+        
+        Raises:
+            ValueError: If the filesystem is unsupported.
         """
-        fileio: BaseFileIO = __class__._instantiate(fpath=path, filesystem=filesystem, *args, **kwargs)
-        return fileio._fmakedirs(dirpath=path, exist_ok=exist_ok, *args, **kwargs)
+        # For directory creation, we don't need file extension validation
+        # Work directly with UPath to avoid BaseFileIO's file extension requirements
+        if filesystem is not None and filesystem not in fsspec.available_protocols():
+            raise ValueError(f"Unsupported filesystem: {filesystem}")
+        
+        upath_obj: UPath = UPath(path, protocol=filesystem)
+        try:
+            upath_obj.fs.makedirs(path, exist_ok=exist_ok, *args, **kwargs)
+        except OSError as e:
+            warnings.warn(f"Failed to create directories for {path}: {e}")
+            raise e
 
     @staticmethod
     @retry_args
