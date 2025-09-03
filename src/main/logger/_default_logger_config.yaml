@@ -6,7 +6,7 @@ formats:
 # define handlers
 handlers:
   handler_file:
-    sink: "./.logs"
+    sink: "./logs/.logs"
     format: "simple"
     level: "DEBUG"
     # retention: "30 days"
@@ -25,3 +25,17 @@ loggers:
       level: "DEBUG"
     - handler: "handler_console"
       level: "DEBUG"
+
+# =================================================
+# COPY MANAGEMENT
+# =================================================
+copy_manager:
+  test_copy_1: #copy_name
+    path_patterns: "./logs/**"
+    copy_destination: "./logs_copy/"
+    # root_dir: 
+    copy_interval: 5 # seconds
+    create_dest_dirs: true
+    preserve_structure: False
+    max_retries: 3
+    retry_delay: 5

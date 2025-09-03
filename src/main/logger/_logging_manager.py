@@ -241,15 +241,18 @@ class LoggingManager:
             AssertionError: If the 'level' key is missing or invalid in the handler configuration.
             AssertionError: If the 'format' key is missing or invalid in the handler configuration.
         """
-        assert "sink" in handler_conf, f"Handler {handler_name} must have a 'sink' key. Please define a sink for the handler in the config file."
-        assert "level" in handler_conf, f"Handler {handler_name} must have a 'level' key. Please define a level for the handler in the config file."
-        assert "format" in handler_conf, f"Handler {handler_name} must have a 'format' key. Please define a format for the handler in the config file."
+        if "sink" not in handler_conf:
+            raise AssertionError(f"Handler {handler_name} must have a 'sink' key. Please define a sink for the handler in the config file.")
+        if "level" not in handler_conf:
+            raise AssertionError(f"Handler {handler_name} must have a 'level' key. Please define a level for the handler in the config file.")
+        if "format" not in handler_conf:
+            raise AssertionError(f"Handler {handler_name} must have a 'format' key. Please define a format for the handler in the config file.")
 
         format_str = handler_conf["format"]
 
         extracted_format = format_conf.get(format_str, {})
         if not extracted_format:
-            sys.stderr.write(
+            sys.stdout.write(
                 f" ⚠️ The format referenced by handler '{handler_name}' is not defined in the 'formats' section of the config file."
                 f" Using the format as is: \n"
                 f"\t {format_str} \n\n"

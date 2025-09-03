@@ -10,7 +10,7 @@ import glob
 import threading
 import time
 import signal
-from typing import Optional, List, Set, Dict, Any
+from typing import Optional, List, Set, Dict, Any, Union
 from pathlib import Path
 
 from ..file_io import FileIOInterface
@@ -24,11 +24,12 @@ class CopyManager:
     thread with configurable retry logic and error handling.
     """
     
-    def __init__(self, enabled: bool = True):
+    def __init__(self, config: Optional[dict] = None, enabled: bool = True):
         """
         Initialize CopyManager.
         
         Args:
+            config (Optional[dict]): Configuration dictionary for copy operations.
             enabled (bool): Whether copy functionality is enabled. Default is True.
         """
         self._enabled = enabled
@@ -40,13 +41,18 @@ class CopyManager:
 
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
+        
+        self.config = config
     
+    # ===============================================================
+    # SETUP SIGNAL HANDLERS
+    # ===============================================================
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
         def signal_handler(signum, frame):
             """Modify signal handler to perform cleanup."""
             print(f"\nReceived signal '{signum}'. Stopping all copy operations and cleaning up...")
-            self._copy_operations(timeout=60.0)
+            self.cleanup(timeout=60.0)
             # restore default handler and re-raise signal
             signal.signal(signum, signal.SIG_DFL)
             os.kill(os.getpid(), signum)
@@ -63,17 +69,60 @@ class CopyManager:
                     f"CopyManager will rely on external cleanup instead."
                 )
 
-    def is_enabled(self) -> bool:
-        """Check if copy functionality is enabled."""
-        return self._enabled
-    
+    # ===============================================================
+    # COPY MANAGEMENT
+    # ===============================================================
+    def start_copy_from_config(
+            self,
+            copy_config: dict = None
+    ) -> None:
+        """
+        Start a copy operation based on the provided configuration.
+
+        Args:
+            copy_config (dict): Configuration dictionary for the copy operation.
+        """
+        if copy_config is None:
+            copy_config = self.config
+            print("No copy_config provided, reading from config path.")
+
+        if not copy_config:
+            print("Warning: No 'copy_manager' found in config. No copy operations started.")
+            return
+
+        # Extract parameters from config
+        for name in copy_config.keys():
+            patterns=copy_config[name].get("path_patterns", None)
+            if isinstance(patterns, str):
+                path_patterns = [p.strip() for p in patterns.split(",") if p.strip()]
+            else:
+                path_patterns = patterns
+                
+            all_kwargs = {
+                "copy_name": name,
+                "path_patterns": path_patterns,
+                "copy_destination": copy_config[name].get("copy_destination", None),
+                "root_dir": copy_config[name].get("root_dir", None),
+                "copy_interval": copy_config[name].get("copy_interval", None),
+                "create_dest_dirs": copy_config[name].get("create_dest_dirs", None),
+                "preserve_structure": copy_config[name].get("preserve_structure", None),
+                "max_retries": copy_config[name].get("max_retries", None),
+                "retry_delay": copy_config[name].get("retry_delay", None)
+            }
+
+            # Filter out keys where the value is None
+            kwargs = {k: v for k, v in all_kwargs.items() if v is not None}
+
+            self.start_copy(**kwargs)
+
+
     def start_copy(
         self,
         copy_name: str,
         path_patterns: List[str],
         copy_destination: str,
         root_dir: Optional[str] = None,
-        copy_interval: int = 60,
+        copy_interval: int = 300,
         create_dest_dirs: bool = True,
         preserve_structure: bool = False,
         max_retries: int = 3,
@@ -285,8 +334,8 @@ class CopyManager:
                 "daemon": thread.daemon
             })
         return operations
-    
-    def trigger_copy_now(self, copy_name: Optional[str] = None) -> None:
+
+    def trigger_copy_now(self, copy_name: Optional[Union[str, List[str]]] = None) -> None:
         """
         Manually trigger an immediate copy operation for specific or all operations.
         
@@ -295,15 +344,15 @@ class CopyManager:
         critical operations or during testing.
         
         Args:
-            copy_name (Optional[str]): Name of specific copy operation to trigger.
+            copy_name (Optional[Union[str, List[str]]]): List of copy operations to trigger.
                                      If None, triggers all active operations.
                                      
         Raises:
             ValueError: If copy_name is specified but doesn't exist.
             
         Example:
-            # Trigger specific operation
-            copy_manager.trigger_copy_now("my_copy_operation")
+            # Trigger specific operations
+            copy_manager.trigger_copy_now(["operation1", "operation2"])
             
             # Trigger all operations  
             copy_manager.trigger_copy_now()
@@ -313,10 +362,16 @@ class CopyManager:
             return
             
         if copy_name is not None:
-            for name in copy_name:
+            # Ensure copy_name is a list for consistent handling
+            if isinstance(copy_name, str):
+                copy_names = [copy_name]
+            else:
+                copy_names = copy_name
+                
+            # Validate all names exist
+            for name in copy_names:
                 if name not in self._copy_threads:
                     raise ValueError(f"Copy operation '{name}' does not exist")
-            copy_names = copy_name
         else:
             copy_names = list(self._copy_threads.keys())
             

@@ -10,7 +10,7 @@ concerns into specialized components:
 """
 
 import atexit
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from ._logging_manager import LoggingManager
 from ._copy_manager import CopyManager
@@ -39,9 +39,6 @@ class LogManager:
     This design provides better maintainability, testability, and separation of concerns
     while maintaining full backward compatibility with existing code.
     """
-    
-    # Backward compatibility - expose DEFAULT_CONFIG_PATH
-    DEFAULT_CONFIG_PATH = LoggingManager.DEFAULT_CONFIG_PATH
 
     def __init__(
             self,
@@ -62,7 +59,7 @@ class LogManager:
         self._logging_manager = LoggingManager(config_path=config_path, timezone=timezone)
         
         # Initialize copy manager (enabled based on distributed coordination)
-        self._copy_manager = CopyManager(enabled=self._coordinator.copy_enabled)
+        self._copy_manager = CopyManager(config=self.config.get("copy_manager", {}), enabled=self._coordinator.copy_enabled)
 
         # Register cleanup on exit
         atexit.register(self._cleanup)
@@ -216,18 +213,29 @@ class LogManager:
     # ========================================================================================
     # COPY METHODS - Delegate to CopyManager
     # ========================================================================================
-    
+    def start_copy_from_config(
+            self,
+            config: dict = None
+    ) -> None:
+        """
+        Start all copy operations based on the provided configuration.
+
+        Args:
+            config (dict): Configuration dictionary for the copy operation. Defaults to None.
+        """
+        self._copy_manager.start_copy_from_config(config)
+
     def start_copy(
         self,
-        copy_name: str,
-        path_patterns: List[str],
-        copy_destination: str,
+        copy_name: str = None,
+        path_patterns: str = None,
+        copy_destination: str = None,
         root_dir: Optional[str] = None,
-        copy_interval: int = 60,
-        create_dest_dirs: bool = True,
-        preserve_structure: bool = False,
-        max_retries: int = 3,
-        retry_delay: int = 5
+        copy_interval: Optional[int] = None,
+        create_dest_dirs: Optional[bool] = None,
+        preserve_structure: Optional[bool] = None,
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[int] = None
     ) -> None:
         """
         Start a background thread to periodically copy log files from local to destination.
@@ -242,37 +250,41 @@ class LogManager:
             copy_destination (str): Destination directory path.
                 Example: "hdfs://namenode:port/path/to/hdfs/logs/"
             root_dir (Optional[str]): Root directory for the local files.
-            copy_interval (int): Interval in seconds between copy operations. Default is 60 seconds.
-            create_dest_dirs (bool): Whether to create destination directories if they don't exist.
-            preserve_structure (bool): Whether to preserve local directory structure in destination.
+            copy_interval (Optional[int]): Interval in seconds between copy operations. Default is 60 seconds.
+            create_dest_dirs (Optional[bool]): Whether to create destination directories if they don't exist.
+            preserve_structure (Optional[bool]): Whether to preserve local directory structure in destination.
                 If True, root_dir must be specified.
                 If True: "/local/logs/app/file.log" -> "hdfs://dest/app/file.log"
                 If False: "/local/logs/app/file.log" -> "hdfs://dest/file.log"
-            max_retries (int): Maximum number of retry attempts for failed copies. Default is 3.
-            retry_delay (int): Delay in seconds between retry attempts. Default is 5.
-            
+            max_retries (Optional[int]): Maximum number of retry attempts for failed copies. Default is 3.
+            retry_delay (Optional[int]): Delay in seconds between retry attempts. Default is 5.
+
         Raises:
             ValueError: If copy_name already exists or parameters are invalid.
         """
-        return self._copy_manager.start_copy(
-            copy_name=copy_name,
-            path_patterns=path_patterns,
-            copy_destination=copy_destination,
-            root_dir=root_dir,
-            copy_interval=copy_interval,
-            create_dest_dirs=create_dest_dirs,
-            preserve_structure=preserve_structure,
-            max_retries=max_retries,
-            retry_delay=retry_delay
-        )
+        all_kwargs = {
+            "copy_name": copy_name,
+            "path_patterns": path_patterns,
+            "copy_destination": copy_destination,
+            "root_dir": root_dir,
+            "copy_interval": copy_interval,
+            "create_dest_dirs": create_dest_dirs,
+            "preserve_structure": preserve_structure,
+            "max_retries": max_retries,
+            "retry_delay": retry_delay
+        }
 
-    def stop_copy(self, copy_name: str, timeout: float = 10.0) -> bool:
+        kwargs = {k: v for k, v in all_kwargs.items() if v is not None}
+        
+        return self._copy_manager.start_copy(**kwargs)
+
+    def stop_copy(self, copy_name: str, timeout: float = None) -> bool:
         """
         Stop a running copy operation.
         
         Args:
             copy_name (str): Name of the copy operation to stop.
-            timeout (float): Maximum time to wait for thread to stop. Default is 10 seconds.
+            timeout (float): Maximum time to wait for thread to stop. Defaults to None.
             
         Returns:
             bool: True if successfully stopped, False if timeout occurred.
@@ -280,9 +292,15 @@ class LogManager:
         Raises:
             ValueError: If copy_name doesn't exist.
         """
-        return self._copy_manager.stop_copy(copy_name, timeout)
+        all_kwargs = {
+            "copy_name": copy_name,
+            "timeout": timeout
+        }
 
-    def stop_all_copy(self, timeout: float = 30.0, verbose: bool = False) -> List[str]:
+        kwargs = {k: v for k, v in all_kwargs.items() if v is not None}
+        return self._copy_manager.stop_copy(**kwargs)
+
+    def stop_all_copy(self, timeout: float = None, verbose: bool = None) -> List[str]:
         """
         Stop all running copy operations.
         
@@ -293,7 +311,13 @@ class LogManager:
         Returns:
             List[str]: Names of copy operations that failed to stop within timeout.
         """
-        return self._copy_manager.stop_all_copy_operations(timeout, verbose)
+        all_kwargs = {
+            "timeout": timeout,
+            "verbose": verbose
+        }
+
+        kwargs = {k: v for k, v in all_kwargs.items() if v is not None}
+        return self._copy_manager.stop_all_copy_operations(**kwargs)
 
     def list_copy_operations(self) -> List[dict]:
         """
@@ -304,7 +328,7 @@ class LogManager:
         """
         return self._copy_manager.list_copy_operations()
     
-    def trigger_copy_now(self, copy_name: Optional[str] = None) -> None:
+    def trigger_copy_now(self, copy_name: Optional[Union[str, List[str]]]  = None) -> None:
         """
         Manually trigger an immediate copy operation for specific or all copy operations.
         
@@ -325,8 +349,8 @@ class LogManager:
     # ========================================================================================
     # CLEANUP METHODS
     # ========================================================================================
-    
-    def _cleanup(self, timeout: float = 60.0):
+
+    def _cleanup(self, timeout: float = None):
         """
         Cleanup function to remove all handlers and loggers.
         
@@ -344,8 +368,10 @@ class LogManager:
         print("LogManager cleanup initiated...")
         
         # Cleanup copy operations first (includes final copy)
-        self._copy_manager.cleanup(timeout)
         
+        kwargs = {"timeout": timeout} if timeout is not None else {}
+        self._copy_manager.cleanup(**kwargs)
+
         # Cleanup logging
         self._logging_manager.cleanup()
         
