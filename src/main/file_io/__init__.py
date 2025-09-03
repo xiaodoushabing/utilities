@@ -17,8 +17,12 @@ class FileIOInterface:
 
         Returns:
             BaseFileIO: An instance of BaseFileIO or its subclass.
+        
+        Raises:
+            ValueError: If the filesystem is unsupported.
         """
-        assert filesystem is None or filesystem in fsspec.available_protocols() # TODO
+        if filesystem is not None and filesystem not in fsspec.available_protocols():
+            raise ValueError(f"Unsupported filesystem: {filesystem}")
         upath_obj: UPath = UPath(fpath, protocol=filesystem)
         fileio: BaseFileIO = BaseFileIO(upath_obj=upath_obj, *args, **kwargs)
         return fileio
