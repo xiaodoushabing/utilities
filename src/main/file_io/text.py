@@ -16,7 +16,8 @@ class TextFileIO:
         Returns:
             str: Contents of the text file.
         """
-        return b.read().decode('utf-8')
+        # return b.read().decode('utf-8')
+        return b.read().decode()
     
     @staticmethod
     def _write(upath_obj: UPath, data: str, mode: str='w', *args, **kwargs):
@@ -28,5 +29,6 @@ class TextFileIO:
             data (str): Data to write to the text file.
             mode (str): Mode to open the file, default is 'w'.
         """
-        with upath_obj.fs.open(upath_obj.path, mode, newline='', encoding='utf-8') as f:
+        # with upath_obj.fs.open(upath_obj.path, mode, newline='', encoding='utf-8') as f:
+        with upath_obj.fs.open(upath_obj.path, mode) as f:
             f.write(data, *args, **kwargs)

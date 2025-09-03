@@ -30,5 +30,5 @@ class ParquetFileIO:
             mode (str): Mode to open the file, default is 'wb'.
         """
         with upath_obj.fs.open(upath_obj.path, mode) as f:
-            data.to_parquet(f, index=False, *args, **kwargs)
+            data.to_parquet(f, *args, **kwargs)
             # data.to_parquet(f, index=False, use_content_defined_chunking=True,*args, **kwargs)

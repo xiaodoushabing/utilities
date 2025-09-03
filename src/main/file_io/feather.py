@@ -31,4 +31,5 @@ class FeatherFileIO:
             mode (str): Mode to open the file, default is 'wb'.
         """
         with upath_obj.fs.open(upath_obj.path, mode) as f:
-            data.reset_index(drop=True).to_feather(f, *args, **kwargs)
+            # data.reset_index(drop=True).to_feather(f, *args, **kwargs)
+            data.to_feather(f, *args, **kwargs)

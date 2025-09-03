@@ -31,4 +31,4 @@ class CSVFileIO:
             mode (str): Mode to open the file, default is 'w'.
         """
         with upath_obj.fs.open(upath_obj.path, mode) as f:
-            data.to_csv(f, index=False, *args, **kwargs)
+            data.to_csv(f, *args, **kwargs)

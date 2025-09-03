@@ -1,7 +1,6 @@
 from io import BytesIO
 import warnings
 from upath import UPath
-from upath import UPath
 from typing import Union, Literal
 
 from .arrow import ArrowFileIO
@@ -18,6 +17,7 @@ fileio_mapping = {
     "csv": CSVFileIO,
     "txt": TextFileIO,
     "text": TextFileIO,
+    "log": TextFileIO,
     "sql": SQLFileIO,
     "json": JsonFileIO,
     "yaml": YamlFileIO,
@@ -127,9 +127,24 @@ class BaseFileIO:
         Args:
             data (object): Data to write to the file.
             mode (Literal['wb', 'w']): Mode to open the file, either 'wb' for binary or 'w' for text.
+            If not provided, the mode is set based on file type.
         """
         self._validate_data_type(data, self.file_extension)
-        
+
+        # Set default mode based on file extension if not provided
+        if 'mode' not in kwargs or kwargs['mode'] is None:
+            # Binary formats (actual binary file formats)
+            binary_exts = {'feather', 'parquet', 'arrow', 'pickle', 'pkl'}
+            # Text formats (including CSV which is text-based)
+            text_exts = {'csv', 'txt', 'text', 'sql', 'log', 'json', 'yaml', 'yml'}
+            if self.file_extension in binary_exts:
+                kwargs['mode'] = 'wb'
+            elif self.file_extension in text_exts:
+                kwargs['mode'] = 'w'
+            else:
+                # Fallback to text mode
+                kwargs['mode'] = 'w'
+
         file_io_cls = fileio_mapping[self.file_extension]
         return file_io_cls._write(self.upath, data, *args, **kwargs)
     
@@ -145,10 +160,9 @@ class BaseFileIO:
         
         # Define required types for each format
         dataframe_formats = {'csv', 'feather', 'parquet', 'arrow'}
-        str_formats = {'txt', 'text', 'sql'}
+        str_formats = {'txt', 'text', 'sql', 'log'}
         serializable_formats = {'json', 'yaml', 'yml', 'pickle', 'pkl'}
 
-        
         # JSON and YAML can accept various serializable types, so we don't restrict them
         # Pickle can accept any object, so no validation needed
         if file_extension in dataframe_formats:
@@ -200,7 +214,8 @@ class BaseFileIO:
             return  # Don't raise error for non-existent files
             
         try:
-            self.upath.fs.delete(filepath, *args, **kwargs)
+            # Use the same filesystem instance for consistency
+            delete_upath.fs.rm(delete_upath.path, *args, **kwargs)
         except OSError as e:
             warnings.warn(f"Failed to delete {filepath}: {e}")
             raise e
