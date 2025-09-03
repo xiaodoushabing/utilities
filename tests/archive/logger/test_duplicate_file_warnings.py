@@ -1,5 +1,5 @@
 """
-Tests for duplicate file copy warnings in HDFS copy operations.
+Tests for duplicate file copy warnings in copy operations.
 """
 
 import pytest
@@ -86,16 +86,16 @@ class TestDuplicateFileWarnings:
         assert "WARNING" not in captured.out
         assert "copy2" not in log_manager._copy_operations_files
 
-    @patch('utilities.LogManager.stop_all_hdfs_copy')
+    @patch('utilities.LogManager.stop_all_copy')
     @patch('builtins.print')
-    def test_cleanup_removes_file_tracking(self, mock_print, mock_stop_all_hdfs_copy, log_manager):
+    def test_cleanup_removes_file_tracking(self, mock_print, mock_stop_all_copy, log_manager):
         """Test that cleanup removes file tracking entries."""
         # Set up some file tracking
         log_manager._copy_operations_files["copy1"] = {"/tmp/app.log"}
         log_manager._copy_operations_files["copy2"] = {"/tmp/error.log"}
-        
-        # Mock trigger_hdfs_copy_now to prevent hanging during cleanup
-        with patch.object(log_manager, 'trigger_hdfs_copy_now'):
+
+        # Mock trigger_copy_now to prevent hanging during cleanup
+        with patch.object(log_manager, 'trigger_copy_now'):
             log_manager._cleanup()
         
         # File tracking should be cleared

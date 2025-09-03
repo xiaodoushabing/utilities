@@ -82,7 +82,7 @@ class TestSignalHandlerBehavior:
         
         # Verify shutdown message was printed
         mock_print.assert_any_call(
-            f"\nReceived signal '{sig}'. Stopping all HDFS copy operations and cleaning up..."
+            f"\nReceived signal '{sig}'. Stopping all copy operations and cleaning up..."
         )
 
         # Verify cleanup was called with correct timeout
@@ -91,15 +91,14 @@ class TestSignalHandlerBehavior:
         mock_signal_signal.assert_any_call(sig, signal.SIG_DFL)
         mock_os_kill.assert_called_once_with(os.getpid(), sig)
 
-
     @patch('builtins.print')
-    def test_signal_handler_stops_hdfs_operations(self, mock_print, mock_signal_signal, mock_os_kill, log_manager, hdfs_copy_defaults):
-        """Test that signal handler properly stops HDFS operations."""
-        # Start an HDFS copy operation
-        log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+    def test_signal_handler_stops_copy_operations(self, mock_print, mock_signal_signal, mock_os_kill, log_manager, copy_defaults):
+        """Test that signal handler properly stops copy operations."""
+        # Start a copy operation
+        log_manager.start_copy(**copy_defaults)
         
         # Verify operation is running
-        assert len(log_manager._hdfs_copy_threads) == 1
+        assert len(log_manager._copy_threads) == 1
         
         # Get the signal handler and simulate signal
         log_manager._setup_signal_handlers()
@@ -108,16 +107,16 @@ class TestSignalHandlerBehavior:
         # Simulate receiving SIGINT
         signal_handler(signal.SIGINT, None)
         
-        # Verify HDFS operations were stopped
-        assert len(log_manager._hdfs_copy_threads) == 0
+        # Verify copy operations were stopped
+        assert len(log_manager._copy_threads) == 0
         assert len(log_manager._stop_events) == 0
         
         # Verify signal re-raising occurred
         mock_os_kill.assert_called_once_with(os.getpid(), signal.SIGINT)
     
 
-    def test_signal_handler_prevents_new_hdfs_operations(self, mock_signal_signal, mock_os_kill, log_manager, hdfs_copy_defaults):
-        """Test that signal handler prevents new HDFS operations after cleanup."""
+    def test_signal_handler_prevents_new_copy_operations(self, mock_signal_signal, mock_os_kill, log_manager, copy_defaults):
+        """Test that signal handler prevents new copy operations after cleanup."""
         # Get the signal handler and simulate signal
         log_manager._setup_signal_handlers()
         signal_handler = mock_signal_signal.call_args_list[0][0][1]
@@ -127,10 +126,10 @@ class TestSignalHandlerBehavior:
         
         # Verify shutdown flag is set
         assert log_manager._shutdown_in_progress is True
-        
-        # Try to start a new HDFS operation - should fail
+
+        # Try to start a new copy operation - should fail
         with pytest.raises(ValueError, match="LogManager is shutting down"):
-            log_manager.start_hdfs_copy(**hdfs_copy_defaults)
+            log_manager.start_copy(**copy_defaults)
 
 
 @patch('utilities.logger.os.kill')

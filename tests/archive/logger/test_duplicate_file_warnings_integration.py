@@ -1,8 +1,8 @@
 """
-Integration tests for duplicate file warning functionality in HDFS copy operations.
+Integration tests for duplicate file warning functionality in copy operations.
 
 This module tests the complete end-to-end workflow of duplicate file detection
-across multiple HDFS copy operations, including real file discovery, threading,
+across multiple copy operations, including real file discovery, threading,
 and cleanup scenarios.
 """
 
@@ -16,7 +16,7 @@ from utilities import LogManager
 
 
 class TestDuplicateFileWarningsIntegration:
-    """Integration tests for duplicate file warnings across the full HDFS copy workflow."""
+    """Integration tests for duplicate file warnings across the full copy workflow."""
 
     @pytest.fixture
     def temp_files(self):
@@ -37,8 +37,8 @@ class TestDuplicateFileWarningsIntegration:
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_duplicate_warnings_across_real_hdfs_operations(self, temp_files, capsys):
-        """Test duplicate file warnings in realistic HDFS copy scenario."""
+    def test_duplicate_warnings_across_real_copy_operations(self, temp_files, capsys):
+        """Test duplicate file warnings in realistic copy scenario."""
         temp_dir, files = temp_files
         
         # Create LogManager using the same pattern as in other working tests
