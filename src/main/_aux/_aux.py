@@ -52,3 +52,26 @@ def retry_args(func: Callable):
         except Exception:
             return func(*args, **kwargs)
     return wrapper
+
+def iter_update_dict(dt_base: dict, dt_new: dict) -> dict:
+    """
+    Recursively update a dictionary with another dictionary.
+    
+    Args:
+        dt_base (dict): The original dictionary to be updated.
+        dt_new (dict): The dictionary with updates.
+    
+    Returns:
+        dict: The updated dictionary.
+    """
+    for k, vv in dt_new.items():
+        if k not in dt_base.keys():
+            dt_base[k] = vv
+        else:
+            v = dt_base.get(k, {})
+            if isinstance (v, dict):
+                # print(vv)
+                dt_base[k] = iter_update_dict(v, vv)
+            else:
+                dt_base.update({k: vv})
+    return dt_base
