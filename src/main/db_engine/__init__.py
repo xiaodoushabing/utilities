@@ -87,12 +87,34 @@ class DatabaseEngine:
             except Exception as e:
                 raise ValueError(f"Failed to detect working environment: {e}")
             
-        self._config_credentials = self.conf["db_credentials"]
+        # grab retry config if available
+        # these instance attributes will be used by the retry_args decorator
+        # if keys are missing, don't assign, use default values
+        self._retry_conf = self.conf.get("retry", {})
+        if self._retry_conf:
+            if "max_attempts" in self._retry_conf:
+                self.max_attempts = self._retry_conf.get("max_attempts", None)
+            if "wait" in self._retry_conf:
+                self.wait = self._retry_conf.get("wait", None)
+
+        # grab endpoints
         self._config_endpoint = self.conf["database"]["default"]
         iter_update_dict(self._config_endpoint, self.conf["database"].get(self.ENV, {}))
         
+        # grab credentials
+        self._config_credentials = self.conf["db_credentials"]
         self.credentials_safe_box = CredentialsSafeBox(config=self._config_credentials[self.ENV]["credentials"])
         self.credentials = self.credentials_safe_box._credentials
+
+        # if user and password are provided,
+        # use them for engines defined in config that have missing user/password
+        if self.user and self.password:
+            for engine, credentials in self.credentials.items():
+                if not credentials:
+                    print(f"Using provided user and password for '{engine}' engine.")
+                    self.credentials[engine]["password"] = self.password
+                    self.credentials[engine]["user"] = self.user
+
         self.engines = SimpleNamespace()
         self._instantiate_engines()
         
@@ -150,7 +172,7 @@ class DatabaseEngine:
     ## Database Operations
     ## ==========================================================================================
 
-    # @retry_args
+    @retry_args
     def query(
         self,
         query: str,
@@ -172,7 +194,7 @@ class DatabaseEngine:
         engine_instance = getattr(self.engines, engine)
         return engine_instance.query(query, **kwargs)
 
-    # @retry_args
+    @retry_args
     def execute(
         self,
         query: str,
@@ -194,7 +216,7 @@ class DatabaseEngine:
         engine_instance = getattr(self.engines, engine)
         return engine_instance.execute(query, **kwargs)
 
-    # @retry_args
+    @retry_args
     def write(
         self,
         data: pd.DataFrame,
@@ -216,7 +238,7 @@ class DatabaseEngine:
         engine_instance = getattr(self.engines, engine)
         return engine_instance.write(data, **kwargs)
 
-    # @retry_args
+    @retry_args
     def delete(
         self,
         engine: str,
@@ -236,7 +258,7 @@ class DatabaseEngine:
         engine_instance = getattr(self.engines, engine)
         return engine_instance.delete(**kwargs)
 
-    # @retry_args
+    @retry_args
     def create(
         self,
         engine: str,
@@ -256,7 +278,7 @@ class DatabaseEngine:
         engine_instance = getattr(self.engines, engine)
         return engine_instance.create(**kwargs)
 
-    # @retry_args
+    @retry_args
     def get_table_schema(
         self,
         table: str,
@@ -281,7 +303,8 @@ class DatabaseEngine:
             raise KeyError(f"Engine '{engine}' is not instantiated or does not exist.")
         engine_instance = getattr(self.engines, engine)
         return engine_instance.get_table_schema(table=table, database=database, sub_engine=sub_engine, **kwargs)
-    # @retry_args
+    
+    @retry_args
     def to_pandas(
         self,
         data,
@@ -302,6 +325,7 @@ class DatabaseEngine:
         engine_instance = getattr(self.engines, engine)
         return engine_instance.to_pandas(data, **kwargs)
 
+    @retry_args
     def to_spark(
         self,
         data,

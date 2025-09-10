@@ -25,41 +25,6 @@ def append_to_path_var(path_var: str, path: str) -> None:
         os.environ[path_var] = path if not existing_path else f"{path}:{existing_path.strip(':')}"
 
 
-# def retry_args(func: Callable):
-#     """
-#     Decorator to apply retry logic to a function.
-#     Automatically uses self.max_attempts and self.wait if available.
-#     """
-#     @wraps(func)
-#     def wrapper(*args, **kwargs):
-#         """
-#         Wrapper function to apply retry logic.
-#         """
-#         # Default values
-#         max_attempts = 2
-#         wait = 1
-        
-#         # Get config from instance if available
-#         # args[0] is assumed to be 'self' if method is called on an instance
-#         # args will not be empty if the decorated function is a method
-#         if args and hasattr(args[0], '__dict__'):
-#             if hasattr(args[0], 'max_attempts'):
-#                 max_attempts = getattr(args[0], 'max_attempts', max_attempts)
-#             if hasattr(args[0], 'wait'):
-#                 wait = getattr(args[0], 'wait', wait)
-
-#         try:
-#             retryer = Retrying(
-#                 stop=stop_after_attempt(max_attempts),
-#                 wait=wait_fixed(wait),
-#                 reraise=True
-#             )
-#             return retryer(func, *args, **kwargs)
-        
-#         except Exception:
-#             return func(*args, **kwargs)
-#     return wrapper
-
 def retry_args(func=None, *, max_attempts=2, wait=1):
     """
     Decorator to apply retry logic to a function.
@@ -69,16 +34,31 @@ def retry_args(func=None, *, max_attempts=2, wait=1):
     def decorator(inner_func):
         @wraps(inner_func)
         def wrapper(*args, **kwargs):
-            # Use instance config if available
-            max_attempts = max_attempts
-            wait = wait
+            """Wrapper function to apply retry logic."""
+            # Default values
+            actual_max_attempts = max_attempts
+            actual_wait = wait
+
+            # Get config from instance if available
+            # args[0] is assumed to be 'self' if method is called on an instance
+            # self refers to the instance of the class
+            # args will not be empty if the decorated function is a method
             if args and hasattr(args[0], '__dict__'):
-                max_attempts = getattr(args[0], 'max_attempts', max_attempts)
-                wait = getattr(args[0], 'wait', wait)
+                actual_max_attempts = getattr(args[0], 'max_attempts', max_attempts)
+                actual_wait = getattr(args[0], 'wait', wait)
+            
+            # Ensure we have valid values after getting instance attributes
+            if actual_max_attempts is None:
+                actual_max_attempts = 2
+            if actual_wait is None:
+                actual_wait = 1
+            
+            # print(f"Retrying with max_attempts={actual_max_attempts}, wait={actual_wait}")  # Add this line
+
             try:
                 retryer = Retrying(
-                    stop=stop_after_attempt(max_attempts),
-                    wait=wait_fixed(wait),
+                    stop=stop_after_attempt(actual_max_attempts),
+                    wait=wait_fixed(actual_wait),
                     reraise=True
                 )
                 return retryer(inner_func, *args, **kwargs)
