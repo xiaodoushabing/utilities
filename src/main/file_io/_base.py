@@ -1,7 +1,7 @@
 from io import BytesIO
 import warnings
 from upath import UPath
-from typing import Union, Literal
+from typing import Union, Literal, Optional
 
 from .arrow import ArrowFileIO
 from .csv import CSVFileIO
@@ -79,20 +79,35 @@ class BaseFileIO:
                              f"Supported formats: {list(fileio_mapping.keys())}")
         return file_extension
 
-    def _fread(self, *args, **kwargs) -> object:
+    def _fread(self, offset: int = 0, size: Optional[int] = None, raw_bytes: bool = False, *args, **kwargs) -> object:
         """
         Read the file content.
         
+        Args:
+            offset (int): Offset in bytes from the beginning of the file. Defaults to 0.
+            size (Optional[int]): Number of bytes to read. If None, reads entire file.
+            raw_bytes (bool): If True, returns raw bytes instead of parsed content.
+        
         Returns:
-            object: Parsed file content.
+            object: Parsed file content or raw bytes if raw_bytes=True.
         """
         # Check if file exists
         if not self.upath.exists():
             raise FileNotFoundError(f"File not found: {self.upath.path}")
         
         with self.upath.fs.open(self.upath.path, 'rb') as f:
-            data: BytesIO = BytesIO(f.read(*args, **kwargs))
+            f.seek(offset)
+            if size is not None:
+                raw_data = f.read(size)
+            else:
+                raw_data = f.read(*args, **kwargs)
         
+        # Return raw bytes if requested
+        if raw_bytes:
+            return raw_data
+        
+        # Otherwise, parse according to file format
+        data: BytesIO = BytesIO(raw_data)
         file_io_cls = fileio_mapping[self.file_extension]
         return file_io_cls._read(data)
     
@@ -138,33 +153,45 @@ class BaseFileIO:
             warnings.warn(f"Failed to copy {self.upath.path} to {dest_path}: {e}")
             raise e
 
-    def _fwrite(self, data: object, *args, **kwargs) -> None:
+    def _fwrite(self, data: object, mode: str = None, raw_bytes: bool = False, *args, **kwargs) -> None:
         """
         Write data to the file.
         
         Args:
             data (object): Data to write to the file.
-            mode (Literal['wb', 'w']): Mode to open the file, either 'wb' for binary or 'w' for text.
-            If not provided, the mode is set based on file type.
+            mode (str): Mode to open the file. If not provided, auto-detected based on file type.
+            raw_bytes (bool): If True, writes raw bytes directly without format-specific processing.
         """
+        # Handle raw bytes writing (for file copying)
+        if raw_bytes:
+            if not isinstance(data, bytes):
+                raise TypeError("Data must be bytes when raw_bytes=True")
+            
+            if mode is None:
+                mode = 'wb'  # Default to write binary for raw bytes
+            
+            with self.upath.fs.open(self.upath.path, mode) as f:
+                f.write(data, *args, **kwargs)
+            return
+        
         self._validate_data_type(data, self.file_extension)
 
         # Set default mode based on file extension if not provided
-        if 'mode' not in kwargs or kwargs['mode'] is None:
+        if mode is None:
             # Binary formats (actual binary file formats)
             binary_exts = {'feather', 'parquet', 'arrow', 'pickle', 'pkl'}
             # Text formats (including CSV which is text-based)
             text_exts = {'csv', 'txt', 'text', 'sql', 'log', 'json', 'yaml', 'yml'}
             if self.file_extension in binary_exts:
-                kwargs['mode'] = 'wb'
+                mode = 'wb'
             elif self.file_extension in text_exts:
-                kwargs['mode'] = 'w'
+                mode = 'w'
             else:
                 # Fallback to text mode
-                kwargs['mode'] = 'w'
+                mode = 'w'
 
         file_io_cls = fileio_mapping[self.file_extension]
-        return file_io_cls._write(self.upath, data, *args, **kwargs)
+        return file_io_cls._write(self.upath, data, mode=mode, *args, **kwargs)
     
     def _validate_data_type(self, data: object, file_extension: str) -> None:
         """

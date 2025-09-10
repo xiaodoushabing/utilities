@@ -656,12 +656,6 @@ class CopyManager:
         Raises:
             Exception: If copy operation fails.
         """
-        # Check if dest exists; if not, return 0 as we cannot append
-        dest_exists = FileIOInterface.fexists(dest_path)
-        if not dest_exists:
-            print(f"Destination file {dest_path} does not exist. Cannot copy file.")
-            return 0
-
         try:
             # Get current file size using FileIOInterface
             file_info = FileIOInterface.finfo(local_file)
@@ -677,6 +671,7 @@ class CopyManager:
                 return 0
             
             current_size = file_info.get('size', 0)
+            dest_exists = FileIOInterface.fexists(dest_path)
             
             with self._offset_lock:
                 last_offset = self._file_offsets.get(local_file, 0)
@@ -685,6 +680,11 @@ class CopyManager:
                 # Check if file was truncated/rotated
                 if current_size < last_size:
                     print(f"File {local_file} appears to have been rotated/truncated. Resetting offset to 0.")
+                    last_offset = 0
+                
+                # If destination doesn't exist, perform full copy
+                if not dest_exists:
+                    print(f"Destination file {dest_path} does not exist. Performing full copy.")
                     last_offset = 0
                 
                 # If no new content, return
@@ -696,15 +696,24 @@ class CopyManager:
                     print(f"Invalid last_offset {last_offset} for file {local_file}. Resetting to 0.")
                     last_offset = 0
                 
-                # Attempt copy
+                # Read new content from the appropriate offset using fread with raw_bytes
+                bytes_to_read = current_size - last_offset
+                new_content = FileIOInterface.fread(
+                    read_path=local_file, 
+                    offset=last_offset, 
+                    size=bytes_to_read,
+                    raw_bytes=True
+                )
+                
                 bytes_copied = 0
-                # Append mode - copy new content from last offset
-                with FileIOInterface.fopen(local_file, 'rb') as src:
-                    src.seek(last_offset)
-                    new_content = src.read(current_size - last_offset)
                 if new_content:
-                    with FileIOInterface.fopen(dest_path, 'ab') as dest:
-                        dest.write(new_content)
+                    if dest_exists:
+                        # Append mode - copy new content from last offset
+                        mode = 'ab'  # append in binary mode
+                    else:
+                        # Write mode - create new file with content
+                        mode = 'wb'
+                    FileIOInterface.fwrite(dest_path, new_content, mode=mode, raw_bytes=True)
                     bytes_copied = len(new_content)
                 
                 # Update tracking information
