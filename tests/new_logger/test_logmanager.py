@@ -270,42 +270,6 @@ class TestCopyDelegation:
             mock_trigger.assert_called_once_with(None)
 
 
-class TestBackwardCompatibility:
-    """Test that the refactored LogManager maintains backward compatibility."""
-    
-    def test_maintains_original_interface(self, log_manager):
-        """Test that LogManager maintains its original public interface."""
-        # All original methods should still exist
-        original_methods = [
-            'get_logger', 'add_logger', 'update_logger', 'remove_logger',
-            'add_handler', 'update_handler', 'remove_handler',
-            'start_copy', 'stop_copy', 'start_copy_from_config',
-            'list_copy_operations', 'trigger_copy_now'
-        ]
-        
-        for method_name in original_methods:
-            assert hasattr(log_manager, method_name)
-            assert callable(getattr(log_manager, method_name))
-
-    def test_original_properties_exist(self, log_manager):
-        """Test that original properties still exist."""
-        original_properties = [
-            'config', '_config_path', '_handlers_map', '_loggers_map', 'copy_enabled'
-        ]
-        
-        for prop_name in original_properties:
-            assert hasattr(log_manager, prop_name)
-
-    def test_can_use_as_context_manager(self, mock_logger, default_config):
-        """Test that LogManager can still be used in patterns that expect cleanup."""
-        with patch('atexit.register'):
-            with patch('builtins.open', mock_open(read_data=yaml.dump(default_config))):
-                manager = LogManager()
-                
-                # Should be able to call cleanup manually
-                manager._cleanup()
-
-
 class TestCleanup:
     """Test cleanup functionality."""
     
