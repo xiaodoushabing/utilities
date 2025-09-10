@@ -343,11 +343,18 @@ class TestCleanup:
             }
             manager.start_copy(**params)
         
+        # Add some file tracking to test cleanup
+        manager._file_offsets["test_file.log"] = 100
+        manager._file_sizes["test_file.log"] = 100
+        
         # Cleanup should stop all operations
         manager.cleanup()
         
         assert len(manager._copy_threads) == 0
         assert len(manager._copy_operations_files) == 0
+        assert len(manager._copy_operations_params) == 0
+        assert len(manager._file_offsets) == 0
+        assert len(manager._file_sizes) == 0
 
     def test_cleanup_can_be_called_multiple_times(self):
         """Test that cleanup can be called multiple times safely."""
