@@ -393,3 +393,158 @@ class TestFileDiscovery:
                 assert len(files) == 2  # Should remove duplicates
                 assert "/tmp/file1.log" in files
                 assert "/tmp/file2.log" in files
+
+
+class TestIncrementalCopy:
+    """Test incremental file copy logic using mocks."""
+    
+    @pytest.fixture
+    def manager(self, mock_event, mock_thread):
+        # Use enabled CopyManager with mocked threading
+        mgr = CopyManager(enabled=True)
+        yield mgr
+        mgr.cleanup()
+
+    def test_incremental_copy_only_new_content(self, manager, tmp_path):
+        """Test the actual behavior of _incremental_copy_file method."""
+        file_path = tmp_path / "test.log"
+        dest_path = tmp_path / "dest.log"
+        file_path.write_text("line1\nline2\n")
+        
+        # Mock the thread lock to avoid locking issues in tests
+        mock_lock = MagicMock()
+        mock_lock.__enter__ = MagicMock(return_value=mock_lock)
+        mock_lock.__exit__ = MagicMock(return_value=None)
+        
+        with patch.object(manager, '_offset_lock', mock_lock), \
+             patch.object(manager, '_file_offsets', {}, create=True), \
+             patch.object(manager, '_file_sizes', {}, create=True), \
+             patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
+             patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists, \
+             patch('src.main.file_io.FileIOInterface.fopen') as mock_fopen:
+            
+            # Test 1: First call - destination doesn't exist
+            mock_finfo.return_value = {'size': 6}
+            mock_fexists.return_value = False
+            
+            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            # Current implementation returns 0 when destination doesn't exist
+            assert bytes_copied == 0
+            # Tracking should not be updated when destination doesn't exist
+            assert str(file_path) not in manager._file_offsets
+            assert str(file_path) not in manager._file_sizes
+            
+            # Test 2: Second call - destination exists, append new content
+            # First, set up tracking manually since first call didn't update it
+            manager._file_offsets[str(file_path)] = 6
+            manager._file_sizes[str(file_path)] = 6
+            
+            mock_finfo.return_value = {'size': 12}
+            mock_fexists.return_value = True
+            
+            # Properly mock the context managers
+            mock_src = MagicMock()
+            mock_src.read.return_value = b'line2\n'
+            mock_src.seek.return_value = None
+            mock_src.__enter__ = MagicMock(return_value=mock_src)
+            mock_src.__exit__ = MagicMock(return_value=None)
+            
+            mock_dest = MagicMock()
+            mock_dest.__enter__ = MagicMock(return_value=mock_dest)
+            mock_dest.__exit__ = MagicMock(return_value=None)
+            
+            mock_fopen.side_effect = [mock_src, mock_dest]
+            
+            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            assert bytes_copied == 6  # Now it should copy new content
+            assert manager._file_offsets[str(file_path)] == 12
+            assert manager._file_sizes[str(file_path)] == 12
+            mock_src.seek.assert_called_with(6)
+            mock_dest.write.assert_called_with(b'line2\n')
+
+    def test_incremental_copy_no_new_content(self, manager, tmp_path):
+        """Test that no copy occurs when file size hasn't changed."""
+        file_path = tmp_path / "test.log"
+        dest_path = tmp_path / "dest.log"
+        
+        mock_lock = MagicMock()
+        mock_lock.__enter__ = MagicMock(return_value=mock_lock)
+        mock_lock.__exit__ = MagicMock(return_value=None)
+        
+        with patch.object(manager, '_offset_lock', mock_lock), \
+             patch.object(manager, '_file_offsets', {str(file_path): 6}, create=True), \
+             patch.object(manager, '_file_sizes', {str(file_path): 6}, create=True), \
+             patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo:
+            
+            # File size hasn't changed
+            mock_finfo.return_value = {'size': 6}
+            
+            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            assert bytes_copied == 0  # No new content to copy
+
+    def test_incremental_copy_file_truncated(self, manager, tmp_path, capsys):
+        """Test handling of truncated/rotated files."""
+        file_path = tmp_path / "test.log"
+        dest_path = tmp_path / "dest.log"
+        
+        mock_lock = MagicMock()
+        mock_lock.__enter__ = MagicMock(return_value=mock_lock)
+        mock_lock.__exit__ = MagicMock(return_value=None)
+        
+        with patch.object(manager, '_offset_lock', mock_lock), \
+             patch.object(manager, '_file_offsets', {str(file_path): 10}, create=True), \
+             patch.object(manager, '_file_sizes', {str(file_path): 10}, create=True), \
+             patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
+             patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists, \
+             patch('src.main.file_io.FileIOInterface.fopen') as mock_fopen:
+            
+            # File was truncated (smaller than last known size)
+            mock_finfo.return_value = {'size': 5}
+            mock_fexists.return_value = True
+            
+            # Properly mock the context managers
+            mock_src = MagicMock()
+            mock_src.read.return_value = b'new\n'
+            mock_src.seek.return_value = None
+            mock_src.__enter__ = MagicMock(return_value=mock_src)
+            mock_src.__exit__ = MagicMock(return_value=None)
+            
+            mock_dest = MagicMock()
+            mock_dest.__enter__ = MagicMock(return_value=mock_dest)
+            mock_dest.__exit__ = MagicMock(return_value=None)
+            
+            mock_fopen.side_effect = [mock_src, mock_dest]
+            
+            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            assert bytes_copied == 4  # Should copy all content from offset 0 (length of b'new\n')
+            
+            captured = capsys.readouterr()
+            assert "rotated/truncated" in captured.out
+
+    def test_incremental_copy_file_not_found(self, manager, tmp_path, capsys):
+        """Test handling when file info cannot be retrieved."""
+        file_path = tmp_path / "nonexistent.log"
+        dest_path = tmp_path / "dest.log"
+        
+        mock_lock = MagicMock()
+        mock_lock.__enter__ = MagicMock(return_value=mock_lock)
+        mock_lock.__exit__ = MagicMock(return_value=None)
+        
+        with patch.object(manager, '_offset_lock', mock_lock), \
+             patch.object(manager, '_file_offsets', {str(file_path): 5}, create=True), \
+             patch.object(manager, '_file_sizes', {str(file_path): 5}, create=True), \
+             patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
+             patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists:
+            
+            # Destination exists but file info cannot be retrieved
+            mock_fexists.return_value = True
+            mock_finfo.return_value = None
+            
+            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            assert bytes_copied == 0
+            # Tracking should be reset
+            assert str(file_path) not in manager._file_offsets
+            assert str(file_path) not in manager._file_sizes
+            
+            captured = capsys.readouterr()
+            assert "Could not get file info" in captured.out
