@@ -25,33 +25,70 @@ def append_to_path_var(path_var: str, path: str) -> None:
         os.environ[path_var] = path if not existing_path else f"{path}:{existing_path.strip(':')}"
 
 
-def retry_args(func: Callable):
+# def retry_args(func: Callable):
+#     """
+#     Decorator to apply retry logic to a function.
+#     Automatically uses self.max_attempts and self.wait if available.
+#     """
+#     @wraps(func)
+#     def wrapper(*args, **kwargs):
+#         """
+#         Wrapper function to apply retry logic.
+#         """
+#         # Default values
+#         max_attempts = 2
+#         wait = 1
+        
+#         # Get config from instance if available
+#         # args[0] is assumed to be 'self' if method is called on an instance
+#         # args will not be empty if the decorated function is a method
+#         if args and hasattr(args[0], '__dict__'):
+#             if hasattr(args[0], 'max_attempts'):
+#                 max_attempts = getattr(args[0], 'max_attempts', max_attempts)
+#             if hasattr(args[0], 'wait'):
+#                 wait = getattr(args[0], 'wait', wait)
+
+#         try:
+#             retryer = Retrying(
+#                 stop=stop_after_attempt(max_attempts),
+#                 wait=wait_fixed(wait),
+#                 reraise=True
+#             )
+#             return retryer(func, *args, **kwargs)
+        
+#         except Exception:
+#             return func(*args, **kwargs)
+#     return wrapper
+
+def retry_args(func=None, *, max_attempts=2, wait=1):
     """
     Decorator to apply retry logic to a function.
+    Can be used as @retry_args or @retry_args(max_attempts=3, wait=3).
+    Automatically uses self.max_attempts and self.wait if available.
     """
-    @wraps(func)
-    def wrapper(*args, max_attempts: int = 3, wait: int = 1, **kwargs):
-        """
-        Wrapper function to apply retry logic.
-        
-        Args:
-            max_attempts (int): Maximum number of retry attempts.
-            wait (int): Wait time between retries in seconds.
-        
-        Returns:
-            The result of the function call.
-        """
-        try:
-            retryer = Retrying(
-                stop=stop_after_attempt(max_attempts),
-                wait=wait_fixed(wait),
-                reraise=True
-            )
-            return retryer(func, *args, **kwargs)
-        
-        except Exception:
-            return func(*args, **kwargs)
-    return wrapper
+    def decorator(inner_func):
+        @wraps(inner_func)
+        def wrapper(*args, **kwargs):
+            # Use instance config if available
+            max_attempts = max_attempts
+            wait = wait
+            if args and hasattr(args[0], '__dict__'):
+                max_attempts = getattr(args[0], 'max_attempts', max_attempts)
+                wait = getattr(args[0], 'wait', wait)
+            try:
+                retryer = Retrying(
+                    stop=stop_after_attempt(max_attempts),
+                    wait=wait_fixed(wait),
+                    reraise=True
+                )
+                return retryer(inner_func, *args, **kwargs)
+            except Exception:
+                return inner_func(*args, **kwargs)
+        return wrapper
+
+    if func is not None:
+        return decorator(func)
+    return decorator
 
 def iter_update_dict(dt_base: dict, dt_new: dict) -> dict:
     """
