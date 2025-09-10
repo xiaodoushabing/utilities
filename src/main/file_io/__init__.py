@@ -172,3 +172,24 @@ class FileIOInterface:
         else:
             fileio: BaseFileIO = __class__._instantiate(fpath=path, filesystem=filesystem, *args, **kwargs)
             return fileio._fdelete(filepath=path, *args, **kwargs)
+
+    @staticmethod
+    @retry_args
+    def fopen(fpath: str, mode: str = 'r', filesystem: Optional[str] = None, *args, **kwargs):
+        """
+        Open a file for streaming operations (reading/writing in chunks).
+        
+        Args:
+            fpath (str): File path to open.
+            mode (str): File mode ('r', 'w', 'a', 'rb', 'wb', 'ab', etc.). Defaults to 'r'.
+            filesystem (Optional[str]): Filesystem type, if any. Defaults to None.
+            
+        Returns:
+            File-like object: An opened file handle for streaming operations.
+            
+        Note:
+            Use this for cases where you need to read/write files incrementally
+            rather than loading entire content into memory.
+        """
+        fileio: BaseFileIO = __class__._instantiate(fpath=fpath, filesystem=filesystem, *args, **kwargs)
+        return fileio._fopen(mode=mode, *args, **kwargs)

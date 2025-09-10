@@ -96,6 +96,24 @@ class BaseFileIO:
         file_io_cls = fileio_mapping[self.file_extension]
         return file_io_cls._read(data)
     
+    def _fopen(self, mode: str = 'r', *args, **kwargs):
+        """
+        Open the file for streaming operations (reading/writing in chunks).
+        
+        Args:
+            mode (str): File mode ('r', 'w', 'a', 'rb', 'wb', 'ab', etc.). Defaults to 'r'.
+            
+        Returns:
+            File-like object: An opened file handle for streaming operations.
+            
+        Note:
+            This method bypasses the format-specific FileIO classes and provides
+            direct access to the underlying filesystem for streaming operations.
+            Use this for cases where you need to read/write files incrementally
+            rather than loading entire content into memory.
+        """
+        return self.upath.fs.open(self.upath.path, mode, *args, **kwargs)
+    
     def _fcopy(self, dest_path: str, *args, **kwargs) -> None:
         """
         Copy the file to a new location.
