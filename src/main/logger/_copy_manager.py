@@ -33,11 +33,19 @@ class CopyManager:
             enabled (bool): Whether copy functionality is enabled. Default is True.
         """
         self._enabled = enabled
+        self._shutdown_in_progress = False                              # flag to prevent new copy operations during shutdown
+
+        # Thread and operation tracking
         self._copy_threads: Dict[str, threading.Thread] = {}            # thread_name -> thread object
         self._stop_events: Dict[str, threading.Event] = {}              # thread_name -> threading.Event
         self._copy_operations_files: Dict[str, Set[str]] = {}           # copy_name -> set of files being copied
         self._copy_operations_params: Dict[str, Dict[str, Any]] = {}    # copy_name -> copy parameters dict
-        self._shutdown_in_progress = False                              # flag to prevent new copy operations during shutdown
+        self._operations_lock = threading.Lock()                        # protect copy operations data structures
+
+        # Track file offsets for incremental copying
+        self._file_offsets: Dict[str, int] = {}                         # file_path -> last_read_offset
+        self._file_sizes: Dict[str, int] = {}                           # file_path -> last_known_size
+        self._offset_lock = threading.Lock()                            # protect offset tracking
 
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
@@ -181,8 +189,10 @@ class CopyManager:
             print(f"Copy operation '{copy_name}' skipped: disabled in system environment")
             return
         
-        if copy_name in self._copy_threads:
-            raise ValueError(f"Copy operation '{copy_name}' already exists. Use stop_copy() first.")
+        with self._operations_lock:
+            if copy_name in self._copy_threads:
+                raise ValueError(f"Copy operation '{copy_name}' already exists. Use stop_copy() first.")
+        
         if not path_patterns:
             raise ValueError("path_patterns cannot be empty")
         if not copy_destination:
@@ -201,7 +211,6 @@ class CopyManager:
         
         # Create stop event for this copy operation
         stop_event = threading.Event()
-        self._stop_events[copy_name] = stop_event
         
         # Create and start the copy thread
         copy_thread = threading.Thread(
@@ -222,19 +231,21 @@ class CopyManager:
             name=f"Copy-{copy_name}"
         )
         
-        self._copy_threads[copy_name] = copy_thread
-        self._copy_operations_files[copy_name] = set()  # Initialize empty file set
-        
-        # Store copy parameters for later use (e.g., manual triggers, final copy)
-        self._copy_operations_params[copy_name] = {
-            'path_patterns': path_patterns,
-            'copy_destination': copy_destination,
-            'create_dest_dirs': create_dest_dirs,
-            'preserve_structure': preserve_structure,
-            'root_dir': root_dir,
-            'max_retries': max_retries,
-            'retry_delay': retry_delay
-        }
+        with self._operations_lock:
+            self._stop_events[copy_name] = stop_event
+            self._copy_threads[copy_name] = copy_thread
+            self._copy_operations_files[copy_name] = set()  # Initialize empty file set
+            
+            # Store copy parameters for later use (e.g., manual triggers, final copy)
+            self._copy_operations_params[copy_name] = {
+                'path_patterns': path_patterns,
+                'copy_destination': copy_destination,
+                'create_dest_dirs': create_dest_dirs,
+                'preserve_structure': preserve_structure,
+                'root_dir': root_dir,
+                'max_retries': max_retries,
+                'retry_delay': retry_delay
+            }
         
         copy_thread.start()
         
@@ -254,8 +265,9 @@ class CopyManager:
         Raises:
             ValueError: If copy_name doesn't exist.
         """
-        if copy_name not in self._copy_threads:
-            raise ValueError(f"Copy operation '{copy_name}' does not exist")
+        with self._operations_lock:
+            if copy_name not in self._copy_threads:
+                raise ValueError(f"Copy operation '{copy_name}' does not exist")
         
         # Signal the thread to stop
         self._stop_events[copy_name].set()
@@ -271,10 +283,29 @@ class CopyManager:
             )
             return False
         
-        del self._copy_threads[copy_name]
-        del self._stop_events[copy_name]
-        del self._copy_operations_files[copy_name]  # Clean up file tracking
-        del self._copy_operations_params[copy_name] # Clean up parameter storage
+        # Clean up operation tracking and file offsets
+        with self._operations_lock:
+            files_for_this_op = self._copy_operations_files.get(copy_name, set())
+            
+            # Remove copy operation references
+            del self._copy_threads[copy_name]
+            del self._stop_events[copy_name]
+            del self._copy_operations_files[copy_name]  # Clean up file tracking
+            del self._copy_operations_params[copy_name] # Clean up parameter storage
+        
+        # Separately handle file offset cleanup
+        with self._offset_lock:
+            # Only clean up offsets if no other operations are using these files
+            for file_path in files_for_this_op:
+                still_in_use = False
+                with self._operations_lock:
+                    for other_files in self._copy_operations_files.values():
+                        if file_path in other_files:
+                            still_in_use = True
+                            break
+                if not still_in_use:
+                    self._file_offsets.pop(file_path, None)
+                    self._file_sizes.pop(file_path, None)
         
         print(f"Stopped copy operation '{copy_name}'")
         return True
@@ -297,7 +328,8 @@ class CopyManager:
             print(f"Stopping {len(self._copy_threads)} copy operation(s)...")
             
         failed_to_stop = []
-        copy_names = list(self._copy_threads.keys())
+        with self._operations_lock:
+            copy_names = list(self._copy_threads.keys())
         
         for copy_name in copy_names:
             try:
@@ -326,13 +358,14 @@ class CopyManager:
             List[dict]: Information about active copy operations.
         """
         operations = []
-        for copy_name, thread in self._copy_threads.items():
-            operations.append({
-                "name": copy_name,
-                "thread_name": thread.name,
-                "is_alive": thread.is_alive(),
-                "daemon": thread.daemon
-            })
+        with self._operations_lock:
+            for copy_name, thread in self._copy_threads.items():
+                operations.append({
+                    "name": copy_name,
+                    "thread_name": thread.name,
+                    "is_alive": thread.is_alive(),
+                    "daemon": thread.daemon
+                })
         return operations
 
     def trigger_copy_now(self, copy_name: Optional[Union[str, List[str]]] = None) -> None:
@@ -369,18 +402,21 @@ class CopyManager:
                 copy_names = copy_name
                 
             # Validate all names exist
-            for name in copy_names:
-                if name not in self._copy_threads:
-                    raise ValueError(f"Copy operation '{name}' does not exist")
+            with self._operations_lock:
+                for name in copy_names:
+                    if name not in self._copy_threads:
+                        raise ValueError(f"Copy operation '{name}' does not exist")
         else:
-            copy_names = list(self._copy_threads.keys())
+            with self._operations_lock:
+                copy_names = list(self._copy_threads.keys())
             
         print(f"Manually triggering {len(copy_names)} copy operation(s)...")
         
         for name in copy_names:
             try:
                 # Use stored parameters instead of extracting from thread args
-                params = self._copy_operations_params[name]
+                with self._operations_lock:
+                    params = self._copy_operations_params[name].copy()  # Create a copy to avoid holding lock during execution
                 self._perform_copy_operation(
                     name,
                     params['path_patterns'],
@@ -522,26 +558,27 @@ class CopyManager:
             
         current_files = set(files_to_copy)
         
-        # Check against all other active operations
-        for other_copy_name, other_files in self._copy_operations_files.items():
-            if other_copy_name == copy_name:
-                continue
-                
-            overlapping_files = current_files.intersection(other_files)
-            if overlapping_files:
-                print(
-                    f"WARNING: copy operation '{copy_name}' and '{other_copy_name}' "
-                    f"are both copying {len(overlapping_files)} file(s):"
-                )
-                for file_path in sorted(overlapping_files):
-                    print(f"  - {file_path}")
-                print(
-                    f"This may cause race conditions or unnecessary resource usage. "
-                    f"Consider adjusting your copy operation patterns to avoid overlaps.\n"
-                )
+        # Check against all other active operations (with thread safety)
+        with self._operations_lock:
+            for other_copy_name, other_files in self._copy_operations_files.items():
+                if other_copy_name == copy_name:
+                    continue
+                    
+                overlapping_files = current_files.intersection(other_files)
+                if overlapping_files:
+                    print(
+                        f"WARNING: copy operation '{copy_name}' and '{other_copy_name}' "
+                        f"are both copying {len(overlapping_files)} file(s):"
+                    )
+                    for file_path in sorted(overlapping_files):
+                        print(f"  - {file_path}")
+                    print(
+                        f"This may cause race conditions or unnecessary resource usage. "
+                        f"Consider adjusting your copy operation patterns to avoid overlaps.\n"
+                    )
 
-        # Update the file set for this operation
-        self._copy_operations_files[copy_name] = current_files
+            # Update the file set for this operation
+            self._copy_operations_files[copy_name] = current_files
 
     def _copy_files_to_dest(
         self,
@@ -554,10 +591,12 @@ class CopyManager:
         retry_delay: int
     ) -> None:
         """
-        Copy a list of local files to target destination.
+        Copy a list of local files to target destination using incremental copying.
+        Only new content since last copy is transferred to reduce I/O overhead.
         """
         success_count = 0
         error_count = 0
+        bytes_copied = 0
         
         for local_file in local_files:
             if preserve_structure:
@@ -576,14 +615,20 @@ class CopyManager:
 
             for attempt in range(max_retries + 1):
                 try:
-                    # Copy file using FileIO interface
-                    FileIOInterface.fcopy(
-                        read_path=local_file,
-                        dest_path=dest_path,
-                    )
-                    
-                    success_count += 1
-                    print(f"Successfully copied {local_file} -> {dest_path}")
+                    # Deprecate entire file copy logic in favor of incremental copy
+                    # FileIOInterface.fcopy(
+                    #     read_path=local_file,
+                    #     dest_path=dest_path,
+                    # )
+                    # success_count += 1
+                    # print(f"Successfully copied {local_file} -> {dest_path}")
+                    copied_bytes = self._incremental_copy_file(local_file, dest_path)
+                    if copied_bytes > 0:
+                        success_count += 1
+                        bytes_copied += copied_bytes
+                        print(f"Successfully copied {copied_bytes} bytes from {local_file} -> {dest_path}")
+                    else:
+                        print(f"No new content in {local_file} (already up to date)")
                     break
                     
                 except Exception as e:
@@ -595,7 +640,74 @@ class CopyManager:
                         error_count += 1
         
         if success_count > 0 or error_count > 0:
-            print(f"Copy completed: {success_count} successful, {error_count} failed")
+            print(f"Copy completed: {success_count} successful, {error_count} failed, {bytes_copied} bytes transferred")
+
+    def _incremental_copy_file(self, local_file: str, dest_path: str) -> int:
+        """
+        Perform incremental copy of a file, only copying new content since last copy.
+        
+        Args:
+            local_file (str): Path to the local source file.
+            dest_path (str): Path to the destination file.
+            
+        Returns:
+            int: Number of bytes copied (0 if no new content).
+            
+        Raises:
+            Exception: If copy operation fails.
+        """
+        try:
+            # Get current file size using FileIOInterface
+            file_info = FileIOInterface.finfo(local_file)
+            if file_info is None:
+                # Reset offset tracking and skip this iteration - file may become accessible later
+                print(
+                    f"Warning: Could not get file info for {local_file}\n"
+                    f"(may not exist, permission denied, or temporary I/O error). "
+                    f"Resetting tracking and skipping this iteration.")
+                with self._offset_lock:
+                    self._file_offsets.pop(local_file, None)
+                    self._file_sizes.pop(local_file, None)
+                return 0
+            current_size = file_info.get('size', 0)
+            
+            with self._offset_lock:
+                last_offset = self._file_offsets.get(local_file, 0)
+                last_size = self._file_sizes.get(local_file, 0)
+                
+                # Check if file was truncated/rotated
+                if current_size < last_size:
+                    print(f"File {local_file} appears to have been rotated/truncated. Resetting offset.")
+                    last_offset = 0
+                
+                # If no new content, return
+                if current_size == last_offset:
+                    return 0
+                
+                # Attempt copy
+                dest_exists = FileIOInterface.fexists(dest_path)
+                bytes_copied = 0
+                
+                if dest_exists and last_offset >= 0:
+                    # Append mode - copy new content from last offset
+                    with FileIOInterface.fopen(local_file, 'rb') as src:
+                        src.seek(last_offset)
+                        new_content = src.read(current_size - last_offset)
+                    
+                    if new_content:
+                        with FileIOInterface.fopen(dest_path, 'ab') as dest:
+                            dest.write(new_content)
+                        bytes_copied = len(new_content)
+                
+                # Update tracking information
+                self._file_offsets[local_file] = current_size
+                self._file_sizes[local_file] = current_size
+                
+                return bytes_copied
+                
+        except Exception as e:
+            # On error, don't update offsets so we can retry
+            raise Exception(f"Incremental copy failed for {local_file}: {e}")
 
     ## ------------------------------ CLEANUP ------------------------------ ##
     def cleanup(self, timeout: float = 60.0):
@@ -627,6 +739,14 @@ class CopyManager:
                 print(f"Warning: Final copy failed during cleanup: {e}")
         
         self.stop_all_copy_operations(timeout=timeout, verbose=True)
-        self._copy_operations_files.clear()
-        self._copy_operations_params.clear()
+        
+        # Clear all data structures with proper locking
+        with self._operations_lock:
+            self._copy_operations_files.clear()
+            self._copy_operations_params.clear()
+        
+        with self._offset_lock:
+            self._file_offsets.clear()
+            self._file_sizes.clear()
+        
         print("CopyManager cleanup completed.")
