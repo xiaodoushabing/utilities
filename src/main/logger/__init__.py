@@ -59,7 +59,11 @@ class LogManager:
         self._logging_manager = LoggingManager(config_path=config_path, timezone=timezone)
         
         # Initialize copy manager (enabled based on distributed coordination)
-        self._copy_manager = CopyManager(config=self.config.get("copy_manager", {}), enabled=self._coordinator.copy_enabled)
+        self._copy_manager = CopyManager(
+            config=self.config.get("copy_manager", {}),
+            retry=self.config.get("retry",{}),
+            enabled=self._coordinator.copy_enabled
+        )
 
         # Register cleanup on exit
         atexit.register(self._cleanup)

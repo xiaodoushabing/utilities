@@ -1,3 +1,6 @@
+# =================================================
+# LOGGER MANAGEMENT
+# =================================================
 # define formats
 formats:
   simple: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[logger_name]} | {file: <16} | {function} : {line} - {message}"
@@ -29,13 +32,18 @@ loggers:
 # =================================================
 # COPY MANAGEMENT
 # =================================================
+# define retry settings for copy operations
+retry:
+  max_attempts: 3   # optional. Default if left empty is 2.
+  wait: 3           # optional. Default if left empty is 1. Wait time between retries in seconds.
+
+# define copy tasks
 copy_manager:
-  test_copy_1: #copy_name
+  test_copy_1:          #copy_name
     path_patterns: "./logs/**"
     copy_destination: "./logs_copy/"
-    # root_dir: 
-    copy_interval: 300 # seconds
+    # root_dir:         # required if preserve_structure is true
+    copy_interval: 300  # seconds
     create_dest_dirs: true
     preserve_structure: false
-    max_retries: 3
-    retry_delay: 5
+    

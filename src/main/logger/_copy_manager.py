@@ -14,6 +14,7 @@ from typing import Optional, List, Set, Dict, Any, Union
 from pathlib import Path
 
 from ..file_io import FileIOInterface
+from .._aux import retry_args
 
 
 class CopyManager:
@@ -24,7 +25,7 @@ class CopyManager:
     thread with configurable retry logic and error handling.
     """
     
-    def __init__(self, config: Optional[dict] = None, enabled: bool = True):
+    def __init__(self, config: Optional[dict] = None, retry: Optional[dict] = None, enabled: bool = True):
         """
         Initialize CopyManager.
         
@@ -32,6 +33,8 @@ class CopyManager:
             config (Optional[dict]): Configuration dictionary for copy operations.
             enabled (bool): Whether copy functionality is enabled. Default is True.
         """
+
+        self.config = config
         self._enabled = enabled
         self._shutdown_in_progress = False                              # flag to prevent new copy operations during shutdown
 
@@ -49,9 +52,14 @@ class CopyManager:
 
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
+
+        # Retry configuration
+        if retry:
+            if "max_attempts" in retry:
+                self.max_attempts = retry.get("max_attempts", None)
+            if "wait" in retry:
+                self.wait = retry.get("wait", None)
         
-        self.config = config
-    
     # ===============================================================
     # SETUP SIGNAL HANDLERS
     # ===============================================================
@@ -113,9 +121,7 @@ class CopyManager:
                 "root_dir": copy_config[name].get("root_dir", None),
                 "copy_interval": copy_config[name].get("copy_interval", None),
                 "create_dest_dirs": copy_config[name].get("create_dest_dirs", None),
-                "preserve_structure": copy_config[name].get("preserve_structure", None),
-                "max_retries": copy_config[name].get("max_retries", None),
-                "retry_delay": copy_config[name].get("retry_delay", None)
+                "preserve_structure": copy_config[name].get("preserve_structure", None)
             }
 
             # Filter out keys where the value is None
@@ -132,9 +138,7 @@ class CopyManager:
         root_dir: Optional[str] = None,
         copy_interval: int = 300,
         create_dest_dirs: bool = True,
-        preserve_structure: bool = False,
-        max_retries: int = 3,
-        retry_delay: int = 5
+        preserve_structure: bool = False
     ) -> None:
         """
         Start a background thread to periodically copy log files from local to destination.
@@ -149,14 +153,12 @@ class CopyManager:
             copy_destination (str): destination directory path.
                 Example: "hdfs://namenode:port/path/to/hdfs/logs/"
             root_dir (Optional[str]): Root directory for the local files.
-            copy_interval (int): Interval in seconds between copy operations. Default is 60 seconds.
+            copy_interval (int): Interval in seconds between copy operations. Default is 300 seconds.
             create_dest_dirs (bool): Whether to create destination directories if they don't exist.
             preserve_structure (bool): Whether to preserve local directory structure in destination.
                 If True, root_dir must be specified.
                 If True: "/local/logs/app/file.log" -> "hdfs://dest/app/file.log"
                 If False: "/local/logs/app/file.log" -> "hdfs://dest/file.log"
-            max_retries (int): Maximum number of retry attempts for failed copies. Default is 3.
-            retry_delay (int): Delay in seconds between retry attempts. Default is 5.
             
         Raises:
             ValueError: If copy_name already exists or parameters are invalid.
@@ -199,10 +201,6 @@ class CopyManager:
             raise ValueError("copy_destination cannot be empty")
         if copy_interval <= 0:
             raise ValueError("copy_interval must be positive")
-        if max_retries < 0:
-            raise ValueError("max_retries cannot be negative")
-        if retry_delay < 0:
-            raise ValueError("retry_delay cannot be negative")
         if preserve_structure and not root_dir:
             raise ValueError(
                 "'root_dir' must be specified when 'preserve_structure' is True. "
@@ -223,8 +221,6 @@ class CopyManager:
                 create_dest_dirs,
                 preserve_structure,
                 root_dir,
-                max_retries,
-                retry_delay,
                 stop_event
             ),
             daemon=False,
@@ -242,9 +238,7 @@ class CopyManager:
                 'copy_destination': copy_destination,
                 'create_dest_dirs': create_dest_dirs,
                 'preserve_structure': preserve_structure,
-                'root_dir': root_dir,
-                'max_retries': max_retries,
-                'retry_delay': retry_delay
+                'root_dir': root_dir
             }
         
         copy_thread.start()
@@ -423,9 +417,7 @@ class CopyManager:
                     params['copy_destination'],
                     params['create_dest_dirs'],
                     params['preserve_structure'],
-                    params['root_dir'],
-                    params['max_retries'],
-                    params['retry_delay']
+                    params['root_dir']
                 )
                     
             except Exception as e:
@@ -440,8 +432,6 @@ class CopyManager:
         create_dest_dirs: bool,
         preserve_structure: bool,
         root_dir: Optional[str],
-        max_retries: int,
-        retry_delay: int,
         stop_event: threading.Event
     ) -> None:
         """
@@ -457,9 +447,7 @@ class CopyManager:
                 copy_destination,
                 create_dest_dirs,
                 preserve_structure,
-                root_dir,
-                max_retries,
-                retry_delay
+                root_dir
             )
 
             # Wait for the interval
@@ -468,6 +456,7 @@ class CopyManager:
 
         print(f"Copy worker '{copy_name}' stopped")
         
+    
     def _perform_copy_operation(
         self,
         copy_name: str,
@@ -475,9 +464,7 @@ class CopyManager:
         copy_destination: str,
         create_dest_dirs: bool,
         preserve_structure: bool,
-        root_dir: Optional[str],
-        max_retries: int,
-        retry_delay: int
+        root_dir: Optional[str]
     ) -> None:
         """
         Perform a single copy operation.
@@ -489,8 +476,6 @@ class CopyManager:
             create_dest_dirs (bool): Whether to create destination directories.
             preserve_structure (bool): Whether to preserve directory structure.
             root_dir (Optional[str]): Root directory for relative paths.
-            max_retries (int): Maximum number of retry attempts.
-            retry_delay (int): Delay between retries in seconds.
         """
         try:
             # Find files matching the provided patterns
@@ -507,9 +492,7 @@ class CopyManager:
                     copy_destination,
                     create_dest_dirs,
                     preserve_structure,
-                    root_dir,
-                    max_retries,
-                    retry_delay
+                    root_dir
                 )
             else:
                 print(
@@ -586,13 +569,12 @@ class CopyManager:
         copy_destination: str,
         create_dest_dirs: bool,
         preserve_structure: bool,
-        root_dir: Optional[str],
-        max_retries: int,
-        retry_delay: int
+        root_dir: Optional[str]
     ) -> None:
         """
         Copy a list of local files to target destination using incremental copying.
         Only new content since last copy is transferred to reduce I/O overhead.
+        Retry logic is handled by the @retry_args decorator on _incremental_copy_file.
         """
         success_count = 0
         error_count = 0
@@ -613,38 +595,34 @@ class CopyManager:
                 except Exception as e:
                     print(f"Warning: Could not create directory {dest_dir}: {e}")
 
-            for attempt in range(max_retries + 1):
-                try:
-                    # Deprecate entire file copy logic in favor of incremental copy
-                    # FileIOInterface.fcopy(
-                    #     read_path=local_file,
-                    #     dest_path=dest_path,
-                    # )
-                    # success_count += 1
-                    # print(f"Successfully copied {local_file} -> {dest_path}")
-                    copied_bytes = self._incremental_copy_file(local_file, dest_path)
-                    if copied_bytes > 0:
-                        success_count += 1
-                        bytes_copied += copied_bytes
-                        print(f"Successfully copied {copied_bytes} bytes from {local_file} -> {dest_path}")
-                    else:
-                        print(f"No new content in {local_file} (already up to date)")
-                    break
+            try:
+                # Deprecate entire file copy logic in favor of incremental copy
+                # FileIOInterface.fcopy(
+                #     read_path=local_file,
+                #     dest_path=dest_path,
+                # )
+                # success_count += 1
+                # print(f"Successfully copied {local_file} -> {dest_path}")
+                copied_bytes = self._incremental_copy_file(local_file, dest_path)
+                if copied_bytes > 0:
+                    success_count += 1
+                    bytes_copied += copied_bytes
+                    print(f"Successfully copied {copied_bytes} bytes from {local_file} -> {dest_path}")
+                else:
+                    print(f"No new content in {local_file} (already up to date)")
                     
-                except Exception as e:
-                    if attempt < max_retries:
-                        print(f"Attempt {attempt + 1} failed for {local_file}: {e}. Retrying in {retry_delay}s...")
-                        time.sleep(retry_delay)
-                    else:
-                        print(f"Failed to copy {local_file} after {max_retries + 1} attempts: {e}")
-                        error_count += 1
+            except Exception as e:
+                print(f"Failed to copy {local_file} after retries: {e}")
+                error_count += 1
         
         if success_count > 0 or error_count > 0:
             print(f"Copy completed: {success_count} successful, {error_count} failed, {bytes_copied} bytes transferred")
 
+    @retry_args
     def _incremental_copy_file(self, local_file: str, dest_path: str) -> int:
         """
         Perform incremental copy of a file, only copying new content since last copy.
+        Uses retry_args decorator for automatic retry logic.
         
         Args:
             local_file (str): Path to the local source file.
@@ -654,7 +632,7 @@ class CopyManager:
             int: Number of bytes copied (0 if no new content).
             
         Raises:
-            Exception: If copy operation fails.
+            Exception: If copy operation fails after all retries.
         """
         try:
             # Get current file size using FileIOInterface
@@ -723,6 +701,7 @@ class CopyManager:
                 return bytes_copied
                 
         except Exception as e:
+            print(f"Copy attempt failed for {local_file}: {e}. Will retry...")
             # On error, don't update offsets so we can retry
             raise Exception(f"Incremental copy failed for {local_file}: {e}")
 
