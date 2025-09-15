@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
-from src.main.logger import CopyManager
+from src.main.logging import CopyManager
 
 pytestmark = pytest.mark.unit
 
@@ -19,20 +19,27 @@ pytestmark = pytest.mark.unit
 class TestCopyManagerInstantiation:
     """Test CopyManager initialization and basic properties."""
     
-    def test_initialization_with_defaults(self):
-        """Test CopyManager initialization with default parameters."""
-        manager = CopyManager()
-        assert manager._enabled is True
+    @pytest.mark.parametrize("enabled,retry_config", [
+        (True, None),
+        (False, None),
+        (True, {"max_attempts": 3, "wait": 5}),
+        (False, {"max_attempts": 2, "wait": 10}),
+    ])
+    def test_initialization_variations(self, enabled, retry_config):
+        """Test CopyManager initialization with different parameters."""
+        manager = CopyManager(enabled=enabled, retry=retry_config)
+        assert manager._enabled is enabled
         assert isinstance(manager._copy_threads, dict)
         assert isinstance(manager._stop_events, dict)
         assert isinstance(manager._copy_operations_files, dict)
         assert isinstance(manager._copy_operations_params, dict)
         assert manager._shutdown_in_progress is False
-
-    def test_initialization_disabled(self):
-        """Test CopyManager initialization when disabled."""
-        manager = CopyManager(enabled=False)
-        assert manager._enabled is False
+        
+        if retry_config:
+            assert hasattr(manager, 'max_attempts')
+            assert hasattr(manager, 'wait')
+            assert manager.max_attempts == retry_config["max_attempts"]
+            assert manager.wait == retry_config["wait"]
 
     def test_initialization_with_config(self):
         """Test CopyManager initialization with configuration."""
@@ -40,25 +47,10 @@ class TestCopyManagerInstantiation:
         manager = CopyManager(config=config)
         assert manager.config == config
 
-    def test_enabled_attribute(self):
-        """Test _enabled attribute returns correct state."""
-        enabled_manager = CopyManager(enabled=True)
-        assert enabled_manager._enabled is True
-        
-        disabled_manager = CopyManager(enabled=False)
-        assert disabled_manager._enabled is False
-
 
 class TestCopyValidation:
     """Test copy parameter validation."""
     
-    @pytest.fixture
-    def copy_manager(self):
-        """Create a CopyManager instance for testing."""
-        manager = CopyManager(enabled=True)
-        yield manager
-        manager.cleanup()
-
     @pytest.mark.parametrize("invalid_params", [
         {"copy_name": ""},
         {"copy_name": None},
@@ -68,11 +60,9 @@ class TestCopyValidation:
         {"copy_destination": None},
         {"copy_interval": 0},
         {"copy_interval": -1},
-        {"max_retries": -1},
-        {"retry_delay": -1},
         {"preserve_structure": True, "root_dir": None},
     ])
-    def test_invalid_parameters_raise_error(self, copy_manager, copy_defaults, invalid_params):
+    def test_invalid_parameters_raise_error(self, copy_manager, copy_defaults, invalid_params, mock_thread, mock_event):
         """Test that invalid parameters raise ValueError."""
         params = {**copy_defaults, **invalid_params}
         
@@ -109,13 +99,6 @@ class TestCopyValidation:
 class TestCopyOperations:
     """Test copy operation management."""
     
-    @pytest.fixture
-    def copy_manager(self):
-        """Create a CopyManager instance for testing."""
-        manager = CopyManager(enabled=True)
-        yield manager
-        manager.cleanup()
-
     def test_start_copy_creates_thread(self, copy_manager, copy_defaults, mock_thread, mock_event):
         """Test that starting a copy operation creates a thread."""
         copy_manager.start_copy(**copy_defaults)
@@ -219,13 +202,6 @@ class TestCopyOperations:
 class TestDuplicateFileWarnings:
     """Test warnings for duplicate files across multiple copy operations."""
     
-    @pytest.fixture
-    def copy_manager(self):
-        """Create a CopyManager instance for testing."""
-        manager = CopyManager(enabled=True)
-        yield manager
-        manager.cleanup()
-
     def test_no_warning_for_single_operation(self, copy_manager, capsys):
         """Test that no warning is issued when only one operation copies files."""
         files = ["/tmp/app.log", "/tmp/error.log"]
@@ -311,7 +287,7 @@ class TestSignalHandling:
             manager = CopyManager()
             mock_setup.assert_called_once()
 
-    @patch('src.main.logger._copy_manager.signal.signal')
+    @patch('src.main.logging._copy_manager.signal.signal')
     def test_signal_handlers_registered(self, mock_signal_signal):
         """Test that signal handlers are registered."""
         manager = CopyManager()
@@ -368,13 +344,6 @@ class TestCleanup:
 class TestFileDiscovery:
     """Test file discovery functionality."""
     
-    @pytest.fixture
-    def copy_manager(self):
-        """Create a CopyManager instance for testing."""
-        manager = CopyManager(enabled=True)
-        yield manager
-        manager.cleanup()
-
     def test_discover_files_to_copy_with_glob_patterns(self, copy_manager, sample_log_files):
         """Test file discovery with glob patterns."""
         with patch('glob.glob', return_value=sample_log_files):
@@ -405,14 +374,7 @@ class TestFileDiscovery:
 class TestIncrementalCopy:
     """Test incremental file copy logic using mocks."""
     
-    @pytest.fixture
-    def manager(self, mock_event, mock_thread):
-        # Use enabled CopyManager with mocked threading
-        mgr = CopyManager(enabled=True)
-        yield mgr
-        mgr.cleanup()
-
-    def test_incremental_copy_only_new_content(self, manager, tmp_path):
+    def test_incremental_copy_only_new_content(self, copy_manager, tmp_path):
         """Test the actual behavior of _incremental_copy_file method."""
         file_path = tmp_path / "test.log"
         dest_path = tmp_path / "dest.log"
@@ -423,53 +385,44 @@ class TestIncrementalCopy:
         mock_lock.__enter__ = MagicMock(return_value=mock_lock)
         mock_lock.__exit__ = MagicMock(return_value=None)
         
-        with patch.object(manager, '_offset_lock', mock_lock), \
-             patch.object(manager, '_file_offsets', {}, create=True), \
-             patch.object(manager, '_file_sizes', {}, create=True), \
+        with patch.object(copy_manager, '_offset_lock', mock_lock), \
+             patch.object(copy_manager, '_file_offsets', {}, create=True), \
+             patch.object(copy_manager, '_file_sizes', {}, create=True), \
              patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
              patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists, \
-             patch('src.main.file_io.FileIOInterface.fopen') as mock_fopen:
+             patch('src.main.file_io.FileIOInterface.fread') as mock_fread, \
+             patch('src.main.file_io.FileIOInterface.fwrite') as mock_fwrite:
             
             # Test 1: First call - destination doesn't exist
-            mock_finfo.return_value = {'size': 6}
+            mock_finfo.return_value = {'size': 12}
             mock_fexists.return_value = False
+            mock_fread.return_value = b'line1\nline2\n'
             
-            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
-            # Current implementation returns 0 when destination doesn't exist
-            assert bytes_copied == 0
-            # Tracking should not be updated when destination doesn't exist
-            assert str(file_path) not in manager._file_offsets
-            assert str(file_path) not in manager._file_sizes
+            bytes_copied = copy_manager._incremental_copy_file(str(file_path), str(dest_path))
+            assert bytes_copied == 12  # Should copy full content when destination doesn't exist
+            assert copy_manager._file_offsets[str(file_path)] == 12
+            assert copy_manager._file_sizes[str(file_path)] == 12
             
             # Test 2: Second call - destination exists, append new content
-            # First, set up tracking manually since first call didn't update it
-            manager._file_offsets[str(file_path)] = 6
-            manager._file_sizes[str(file_path)] = 6
-            
-            mock_finfo.return_value = {'size': 12}
+            # Simulate file growth
+            mock_finfo.return_value = {'size': 18}
             mock_fexists.return_value = True
+            mock_fread.return_value = b'line3\n'
             
-            # Properly mock the context managers
-            mock_src = MagicMock()
-            mock_src.read.return_value = b'line2\n'
-            mock_src.seek.return_value = None
-            mock_src.__enter__ = MagicMock(return_value=mock_src)
-            mock_src.__exit__ = MagicMock(return_value=None)
+            bytes_copied = copy_manager._incremental_copy_file(str(file_path), str(dest_path))
+            assert bytes_copied == 6  # Should copy only new content
+            assert copy_manager._file_offsets[str(file_path)] == 18
+            assert copy_manager._file_sizes[str(file_path)] == 18
             
-            mock_dest = MagicMock()
-            mock_dest.__enter__ = MagicMock(return_value=mock_dest)
-            mock_dest.__exit__ = MagicMock(return_value=None)
-            
-            mock_fopen.side_effect = [mock_src, mock_dest]
-            
-            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
-            assert bytes_copied == 6  # Now it should copy new content
-            assert manager._file_offsets[str(file_path)] == 12
-            assert manager._file_sizes[str(file_path)] == 12
-            mock_src.seek.assert_called_with(6)
-            mock_dest.write.assert_called_with(b'line2\n')
+            # Verify fread was called with correct offset
+            mock_fread.assert_called_with(
+                read_path=str(file_path),
+                offset=12,
+                size=6,
+                raw_bytes=True
+            )
 
-    def test_incremental_copy_no_new_content(self, manager, tmp_path):
+    def test_incremental_copy_no_new_content(self, copy_manager, tmp_path):
         """Test that no copy occurs when file size hasn't changed."""
         file_path = tmp_path / "test.log"
         dest_path = tmp_path / "dest.log"
@@ -478,18 +431,20 @@ class TestIncrementalCopy:
         mock_lock.__enter__ = MagicMock(return_value=mock_lock)
         mock_lock.__exit__ = MagicMock(return_value=None)
         
-        with patch.object(manager, '_offset_lock', mock_lock), \
-             patch.object(manager, '_file_offsets', {str(file_path): 6}, create=True), \
-             patch.object(manager, '_file_sizes', {str(file_path): 6}, create=True), \
-             patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo:
+        with patch.object(copy_manager, '_offset_lock', mock_lock), \
+             patch.object(copy_manager, '_file_offsets', {str(file_path): 6}, create=True), \
+             patch.object(copy_manager, '_file_sizes', {str(file_path): 6}, create=True), \
+             patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
+             patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists:
             
             # File size hasn't changed
             mock_finfo.return_value = {'size': 6}
+            mock_fexists.return_value = True
             
-            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            bytes_copied = copy_manager._incremental_copy_file(str(file_path), str(dest_path))
             assert bytes_copied == 0  # No new content to copy
 
-    def test_incremental_copy_file_truncated(self, manager, tmp_path, capsys):
+    def test_incremental_copy_file_truncated(self, copy_manager, tmp_path):
         """Test handling of truncated/rotated files."""
         file_path = tmp_path / "test.log"
         dest_path = tmp_path / "dest.log"
@@ -498,37 +453,34 @@ class TestIncrementalCopy:
         mock_lock.__enter__ = MagicMock(return_value=mock_lock)
         mock_lock.__exit__ = MagicMock(return_value=None)
         
-        with patch.object(manager, '_offset_lock', mock_lock), \
-             patch.object(manager, '_file_offsets', {str(file_path): 10}, create=True), \
-             patch.object(manager, '_file_sizes', {str(file_path): 10}, create=True), \
+        # Set up file path as string to match what's used in the actual method
+        file_path_str = str(file_path)
+        
+        with patch.object(copy_manager, '_offset_lock', mock_lock), \
+             patch.object(copy_manager, '_file_offsets', {file_path_str: 10}, create=True), \
+             patch.object(copy_manager, '_file_sizes', {file_path_str: 10}, create=True), \
              patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
              patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists, \
-             patch('src.main.file_io.FileIOInterface.fopen') as mock_fopen:
+             patch('src.main.file_io.FileIOInterface.fread') as mock_fread, \
+             patch('src.main.file_io.FileIOInterface.fwrite') as mock_fwrite:
             
             # File was truncated (smaller than last known size)
-            mock_finfo.return_value = {'size': 5}
+            mock_finfo.return_value = {'size': 5}  # current_size = 5, last_size = 10
             mock_fexists.return_value = True
+            mock_fread.return_value = b'new\n'
             
-            # Properly mock the context managers
-            mock_src = MagicMock()
-            mock_src.read.return_value = b'new\n'
-            mock_src.seek.return_value = None
-            mock_src.__enter__ = MagicMock(return_value=mock_src)
-            mock_src.__exit__ = MagicMock(return_value=None)
+            bytes_copied = copy_manager._incremental_copy_file(file_path_str, str(dest_path))
+            assert bytes_copied == 4  # Should copy all content from offset 0
             
-            mock_dest = MagicMock()
-            mock_dest.__enter__ = MagicMock(return_value=mock_dest)
-            mock_dest.__exit__ = MagicMock(return_value=None)
-            
-            mock_fopen.side_effect = [mock_src, mock_dest]
-            
-            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
-            assert bytes_copied == 4  # Should copy all content from offset 0 (length of b'new\n')
-            
-            captured = capsys.readouterr()
-            assert "rotated/truncated" in captured.out
+            # Verify fread was called with offset 0 (after truncation reset)
+            mock_fread.assert_called_with(
+                read_path=file_path_str,
+                offset=0,
+                size=5,
+                raw_bytes=True
+            )
 
-    def test_incremental_copy_file_not_found(self, manager, tmp_path, capsys):
+    def test_incremental_copy_file_not_found(self, copy_manager, tmp_path, capsys):
         """Test handling when file info cannot be retrieved."""
         file_path = tmp_path / "nonexistent.log"
         dest_path = tmp_path / "dest.log"
@@ -537,9 +489,9 @@ class TestIncrementalCopy:
         mock_lock.__enter__ = MagicMock(return_value=mock_lock)
         mock_lock.__exit__ = MagicMock(return_value=None)
         
-        with patch.object(manager, '_offset_lock', mock_lock), \
-             patch.object(manager, '_file_offsets', {str(file_path): 5}, create=True), \
-             patch.object(manager, '_file_sizes', {str(file_path): 5}, create=True), \
+        with patch.object(copy_manager, '_offset_lock', mock_lock), \
+             patch.object(copy_manager, '_file_offsets', {str(file_path): 5}, create=True), \
+             patch.object(copy_manager, '_file_sizes', {str(file_path): 5}, create=True), \
              patch('src.main.file_io.FileIOInterface.finfo') as mock_finfo, \
              patch('src.main.file_io.FileIOInterface.fexists') as mock_fexists:
             
@@ -547,11 +499,11 @@ class TestIncrementalCopy:
             mock_fexists.return_value = True
             mock_finfo.return_value = None
             
-            bytes_copied = manager._incremental_copy_file(str(file_path), str(dest_path))
+            bytes_copied = copy_manager._incremental_copy_file(str(file_path), str(dest_path))
             assert bytes_copied == 0
             # Tracking should be reset
-            assert str(file_path) not in manager._file_offsets
-            assert str(file_path) not in manager._file_sizes
+            assert str(file_path) not in copy_manager._file_offsets
+            assert str(file_path) not in copy_manager._file_sizes
             
             captured = capsys.readouterr()
             assert "Could not get file info" in captured.out

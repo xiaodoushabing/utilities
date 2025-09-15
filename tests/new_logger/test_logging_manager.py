@@ -12,7 +12,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
-from src.main.logger import LoggingManager
+from src.main.logging import LoggingManager
 
 pytestmark = pytest.mark.unit
 

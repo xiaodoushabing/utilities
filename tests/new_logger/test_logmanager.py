@@ -7,9 +7,10 @@ which coordinates between LoggingManager, CopyManager, and DistributedCoordinato
 
 import pytest
 import atexit
-from unittest.mock import patch, MagicMock, call
+import yaml
+from unittest.mock import patch, MagicMock, call, mock_open
 
-from src.main.logger import LogManager
+from src.main.logging import LogManager
 
 pytestmark = pytest.mark.unit
 

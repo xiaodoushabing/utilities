@@ -9,7 +9,7 @@ import pytest
 import os
 from unittest.mock import patch, MagicMock
 
-from src.main.logger import DistributedCoordinator
+from src.main.logging import DistributedCoordinator
 
 pytestmark = pytest.mark.unit
 

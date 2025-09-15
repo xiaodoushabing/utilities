@@ -17,7 +17,7 @@ import atexit
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
-from src.main.logger import LogManager, LoggingManager, CopyManager, DistributedCoordinator
+from src.main.logging import LogManager, LoggingManager, CopyManager, DistributedCoordinator
 
 
 # ========================================================================================
@@ -53,7 +53,7 @@ def mock_logger():
     - Pre-configured with realistic return values
     - Allows verification of logger calls
     """
-    with patch('utilities.logger._logging_manager.logger') as mock:
+    with patch('src.main.logging._logging_manager.logger') as mock:
         mock.add.return_value = '123'
         mock.level.return_value = MagicMock(no=20)
         mock.bind.return_value = MagicMock()
@@ -117,9 +117,9 @@ def logging_manager(mock_logger, default_config):
 @pytest.fixture
 def copy_manager():
     """
-    CopyManager instance for testing (disabled by default).
+    CopyManager instance for testing (enabled by default).
     """
-    manager = CopyManager(enabled=False)
+    manager = CopyManager(enabled=True)
     yield manager
     manager.cleanup()
 
@@ -154,7 +154,7 @@ def mock_file_discovery():
     """
     Mock file discovery to return predictable results for copy testing.
     """
-    with patch('utilities.logger._copy_manager.glob.glob') as mock:
+    with patch('src.main.logging._copy_manager.glob.glob') as mock:
         yield mock
 
 
@@ -171,8 +171,17 @@ def copy_defaults():
         "copy_interval": 60,
         "create_dest_dirs": True,
         "preserve_structure": False,
-        "max_retries": 3,
-        "retry_delay": 5,
+    }
+
+
+@pytest.fixture
+def retry_config():
+    """
+    Default retry configuration for testing.
+    """
+    return {
+        "max_attempts": 3,
+        "wait": 5,
     }
 
 
@@ -195,7 +204,7 @@ def mock_thread():
     """
     Creates a mock thread for testing threading functionality.
     """
-    with patch('utilities.logger._copy_manager.threading.Thread') as mock_thread:
+    with patch('src.main.logging._copy_manager.threading.Thread') as mock_thread:
         mock_thread_instance = MagicMock()
         
         def create_mock_thread(*args, **kwargs):
@@ -221,7 +230,7 @@ def mock_event():
     """
     Creates a mock threading.Event for testing Event functionality.
     """
-    with patch('utilities.logger._copy_manager.threading.Event') as mock_event:
+    with patch('src.main.logging._copy_manager.threading.Event') as mock_event:
         mock_event_instance = MagicMock()
         
         event_state = {'is_set': False}
@@ -257,7 +266,7 @@ def mock_signal():
     """
     Mock signal module for testing signal handling.
     """
-    with patch('utilities.logger._copy_manager.signal') as mock_signal:
+    with patch('src.main.logging._copy_manager.signal') as mock_signal:
         mock_signal.SIGTERM = 15
         mock_signal.SIGINT = 2
         yield mock_signal
