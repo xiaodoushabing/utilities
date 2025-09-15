@@ -2,9 +2,9 @@
 Comprehensive test suite for FileIOInterface class.
 
 This file demonstrates pytest best practices following FIRST principles:
-- Fast: Tests run quickly with minimal setup
-- Independent: Each test can run in isolation
-- Repeatable: Tests produce consistent results
+- Fast: Tests run quickly with minimal setup using mocks
+- Independent: Each test can run in isolation using fixtures
+- Repeatable: Tests produce consistent results using controlled mocks
 - Self-Validating: Clear pass/fail with assertions
 - Timely: Tests written alongside code
 
@@ -27,29 +27,11 @@ from src.main.file_io._base import BaseFileIO
 pytestmark = pytest.mark.unit
 
 
-# ========================================================================================
-# PYTEST LEARNING TIP 💡
-# Test classes group related tests together. Each method starting with 'test_' 
-# becomes a separate test case. Classes help organize tests by functionality.
-
-# FIRST PRINCIPLES APPLIED:
-# 📚 Fast: Mocked dependencies, minimal file I/O
-# 🔄 Independent: Each test has isolated setup
-# 🎭 Repeatable: Deterministic with controlled inputs
-# 🧪 Self-Validating: Clear assertions
-# ⏰ Timely: Comprehensive coverage of interface
-# ========================================================================================
-
-
 class TestFileIOInterfaceInstantiation:
     """Test FileIOInterface._instantiate method."""
     
     def test_instantiate_creates_base_fileio_object(self, mock_fsspec):
-        """Test that _instantiate creates a BaseFileIO object correctly.
-        
-        PYTEST: This test validates the core factory method that creates
-        BaseFileIO instances with proper UPath configuration.
-        """
+        """Test that _instantiate creates a BaseFileIO object correctly."""
         test_path = "/test/file.txt"
         
         with patch('src.main.file_io.UPath') as mock_upath_class, \
@@ -73,13 +55,13 @@ class TestFileIOInterfaceInstantiation:
             # Verify correct instance returned
             assert result == mock_baseio_instance
 
-    def test_instantiate_with_filesystem_parameter(self, mock_fsspec):
-        """Test _instantiate with specific filesystem protocol."""
+    @pytest.mark.parametrize("filesystem", ["s3", "gcs", "hdfs", "file"])
+    def test_instantiate_with_filesystem_parameter(self, mock_fsspec, filesystem):
+        """Test _instantiate with different filesystem protocols."""
         test_path = "/test/file.txt"
-        filesystem = "s3"
         
         with patch('src.main.file_io.UPath') as mock_upath_class, \
-             patch('src.main.file_io.BaseFileIO') as mock_baseio_class:
+             patch('src.main.file_io.BaseFileIO'):
             
             FileIOInterface._instantiate(fpath=test_path, filesystem=filesystem)
             
@@ -87,16 +69,12 @@ class TestFileIOInterfaceInstantiation:
             mock_upath_class.assert_called_once_with(test_path, protocol=filesystem)
 
     def test_instantiate_validates_filesystem_protocol(self, mock_fsspec):
-        """Test that invalid filesystem protocols are rejected.
-        
-        PYTEST: Using pytest.raises to validate error conditions.
-        This ensures our validation logic works correctly.
-        """
+        """Test that invalid filesystem protocols are rejected."""
         test_path = "/test/file.txt"
         invalid_filesystem = "invalid_protocol"
         
-        # Test assertion error for invalid protocol
-        with pytest.raises(AssertionError):
+        # Test ValueError for invalid protocol
+        with pytest.raises(ValueError, match="Unsupported filesystem"):
             FileIOInterface._instantiate(fpath=test_path, filesystem=invalid_filesystem)
 
     def test_instantiate_passes_additional_args_and_kwargs(self, mock_fsspec):
@@ -257,7 +235,7 @@ class TestFileIOInterfaceFileCopy:
     """Test FileIOInterface.fcopy method."""
     
     def test_fcopy_calls_baseio_copy_method(self, mock_fsspec):
-        """Test that fcopy properly delegates to BaseFileIO._copy."""
+        """Test that fcopy properly delegates to BaseFileIO._fcopy."""
         read_path = "/source/file.txt"
         dest_path = "/dest/file.txt"
         
@@ -270,8 +248,8 @@ class TestFileIOInterfaceFileCopy:
             # Verify instantiate was called with source path
             mock_instantiate.assert_called_once_with(fpath=read_path, filesystem=None)
             
-            # Verify _copy was called with destination path
-            mock_fileio._copy.assert_called_once_with(dest_path=dest_path)
+            # Verify _fcopy was called with destination path
+            mock_fileio._fcopy.assert_called_once_with(dest_path=dest_path)
 
     def test_fcopy_with_filesystem_parameter(self, mock_fsspec):
         """Test fcopy with specific filesystem protocol."""
@@ -310,14 +288,14 @@ class TestFileIOInterfaceFileCopy:
                 extra_kwarg=extra_kwarg
             )
             
-            # Verify args passed to both instantiate and _copy
+            # Verify args passed to both instantiate and _fcopy
             mock_instantiate.assert_called_once_with(
                 fpath=read_path,
                 filesystem=None,
                 extra_arg=extra_arg,
                 extra_kwarg=extra_kwarg
             )
-            mock_fileio._copy.assert_called_once_with(
+            mock_fileio._fcopy.assert_called_once_with(
                 dest_path=dest_path,
                 extra_arg=extra_arg,
                 extra_kwarg=extra_kwarg
@@ -396,7 +374,7 @@ class TestFileIOInterfaceDirectoryOperations:
         """Test that fmakedirs properly creates directories without BaseFileIO instantiation."""
         dir_path = "/test/new/directories"
         
-        with patch('upath.UPath') as mock_upath_class:
+        with patch('src.main.file_io.UPath') as mock_upath_class:
             mock_upath = MagicMock()
             mock_upath.fs.makedirs = MagicMock()
             mock_upath_class.return_value = mock_upath
@@ -404,7 +382,7 @@ class TestFileIOInterfaceDirectoryOperations:
             FileIOInterface.fmakedirs(path=dir_path)
             
             # Verify UPath was created with correct path
-            mock_upath_class.assert_called_once_with(dir_path)
+            mock_upath_class.assert_called_once_with(dir_path, protocol=None)
             
             # Verify makedirs was called with correct parameters
             mock_upath.fs.makedirs.assert_called_once_with(dir_path, exist_ok=True)
@@ -413,7 +391,7 @@ class TestFileIOInterfaceDirectoryOperations:
         """Test fmakedirs with exist_ok parameter."""
         dir_path = "/test/directories"
         
-        with patch('upath.UPath') as mock_upath_class:
+        with patch('src.main.file_io.UPath') as mock_upath_class:
             mock_upath = MagicMock()
             mock_upath.fs.makedirs = MagicMock()
             mock_upath_class.return_value = mock_upath
@@ -424,39 +402,49 @@ class TestFileIOInterfaceDirectoryOperations:
             mock_upath.fs.makedirs.assert_called_once_with(dir_path, exist_ok=False)
 
     def test_fdelete_calls_baseio_fdelete_method(self, mock_fsspec):
-        """Test that fdelete properly deletes files/directories without BaseFileIO instantiation."""
+        """Test that fdelete properly deletes files using BaseFileIO for files."""
         file_path = "/test/file_to_delete.txt"
         
-        with patch('upath.UPath') as mock_upath_class:
+        with patch('src.main.file_io.UPath') as mock_upath_class, \
+             patch.object(FileIOInterface, '_instantiate') as mock_instantiate:
+            
             mock_upath = MagicMock()
-            mock_upath.exists.return_value = True
-            mock_upath.fs.delete = MagicMock()
+            mock_upath.is_dir.return_value = False  # It's a file, not directory
             mock_upath_class.return_value = mock_upath
+            
+            mock_fileio = MagicMock()
+            mock_instantiate.return_value = mock_fileio
             
             FileIOInterface.fdelete(path=file_path)
             
             # Verify UPath was created with correct path
-            mock_upath_class.assert_called_once_with(file_path)
+            mock_upath_class.assert_called_once_with(file_path, protocol=None)
             
-            # Verify delete was called with correct parameters
-            mock_upath.fs.delete.assert_called_once_with(file_path, recursive=True)
+            # Verify BaseFileIO instantiate was called
+            mock_instantiate.assert_called_once_with(fpath=file_path, filesystem=None)
+            
+            # Verify _fdelete was called with correct parameters
+            mock_fileio._fdelete.assert_called_once_with(filepath=file_path)
 
     def test_fdelete_with_filesystem_parameter(self, mock_fsspec):
-        """Test fdelete with specific filesystem protocol."""
-        file_path = "/test/file_to_delete.txt"
+        """Test fdelete directory deletion with specific filesystem protocol."""
+        dir_path = "/test/directory_to_delete"
         filesystem = "gcs"
         
-        with patch('upath.UPath') as mock_upath_class:
+        with patch('src.main.file_io.UPath') as mock_upath_class:
             mock_upath = MagicMock()
-            mock_upath.exists.return_value = True
-            mock_upath.fs.delete = MagicMock()
+            mock_upath.is_dir.return_value = True  # It's a directory
+            mock_upath.path = dir_path
+            mock_upath.fs.rm = MagicMock()
             mock_upath_class.return_value = mock_upath
             
-            FileIOInterface.fdelete(path=file_path, filesystem=filesystem)
+            FileIOInterface.fdelete(path=dir_path, filesystem=filesystem)
             
-            # Verify UPath was created with correct path
-            # Note: filesystem parameter is currently not used in the implementation
-            mock_upath_class.assert_called_once_with(file_path)
+            # Verify UPath was created with correct path and protocol
+            mock_upath_class.assert_called_once_with(dir_path, protocol=filesystem)
+            
+            # Verify rm was called with recursive=True for directory
+            mock_upath.fs.rm.assert_called_once_with(dir_path, recursive=True)
 
 
 # ========================================================================================
@@ -507,11 +495,12 @@ class TestFileIOInterfaceParametrized:
                 assert call_args.kwargs.get('filesystem') == expected_fs
         
         # Test directory methods that don't use _instantiate
-        with patch('upath.UPath') as mock_upath_class:
+        with patch('src.main.file_io.UPath') as mock_upath_class:
             mock_upath = MagicMock()
             mock_upath.fs.makedirs = MagicMock()
-            mock_upath.exists.return_value = True
-            mock_upath.fs.delete = MagicMock()
+            mock_upath.is_dir.return_value = True  # For fdelete directory test
+            mock_upath.path = test_path
+            mock_upath.fs.rm = MagicMock()
             mock_upath_class.return_value = mock_upath
             
             # Test fmakedirs
