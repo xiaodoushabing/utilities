@@ -4,22 +4,13 @@ Comprehensive test suite for BaseFileIO class.
 This file tests the core BaseFileIO functionality that underlies
 the FileIOInterface. Tests cover file validation, read/write operations,
 directory management, and error handling.
-
-Key testing areas:
-📁 File extension validation
-📖 File reading operations
-✍️ File writing operations  
-📋 File copying operations
-📂 Directory operations
-🚫 Error handling and edge cases
 """
 
 import pytest
 import warnings
-from unittest.mock import patch, MagicMock, mock_open, call
-from io import BytesIO
+from unittest.mock import patch, MagicMock
 
-from src.main.file_io._base import BaseFileIO, fileio_mapping
+from src.main.file_io._base import BaseFileIO
 
 pytestmark = pytest.mark.unit
 

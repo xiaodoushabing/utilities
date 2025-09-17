@@ -4,14 +4,6 @@ Integration test suite for FileIO functionality.
 These tests use real files and file system operations to validate
 the complete FileIO workflow. Tests are designed to be Fast, Independent,
 Repeatable, Self-Validating, and Timely (FIRST principles).
-
-Integration test areas:
-📁 Real file creation and reading
-📝 Data roundtrip testing (write then read)
-🔄 File format conversions
-📋 File copying operations
-📂 Directory management
-🗑️ File deletion operations
 """
 
 import pytest
@@ -90,59 +82,20 @@ class TestFileIOIntegrationRoundtrip:
         else:
             assert read_data == sample_data_by_extension
 
-    def test_csv_roundtrip_integration(self, csv_file_path, sample_dataframe):
-        """Test complete CSV write-read cycle with real files."""
-        # Write DataFrame to CSV file
-        FileIOInterface.fwrite(write_path=csv_file_path, data=sample_dataframe)
-        
-        # Verify file was created
-        assert os.path.exists(csv_file_path)
-        
-        # Read DataFrame back from CSV file
-        read_df = FileIOInterface.fread(read_path=csv_file_path)
-        
-        # Reset index to handle potential index column differences
-        # The CSV write may include index, so we'll reset both DataFrames
-        read_df_reset = read_df.reset_index(drop=True)
-        sample_df_reset = sample_dataframe.reset_index(drop=True)
-        
-        # If read DataFrame has extra columns (like index), select only the original columns
-        if len(read_df.columns) > len(sample_dataframe.columns):
-            # Keep only the columns that exist in the original DataFrame
-            original_columns = sample_dataframe.columns
-            read_df_reset = read_df[original_columns].reset_index(drop=True)
-        
-        # Verify DataFrame roundtrip is correct
-        pd.testing.assert_frame_equal(read_df_reset, sample_df_reset)
-
-    def test_pickle_roundtrip_integration(self, pickle_file_path, sample_json_data):
-        """Test complete pickle write-read cycle with real files."""
-        # Write data to pickle file
-        FileIOInterface.fwrite(write_path=pickle_file_path, data=sample_json_data)
-        
-        # Verify file was created
-        assert os.path.exists(pickle_file_path)
-        
-        # Read data back from pickle file
-        read_data = FileIOInterface.fread(read_path=pickle_file_path)
-        
-        # Verify data roundtrip is correct
-        assert read_data == sample_json_data
-
 
 class TestFileIOIntegrationOperations:
     """Integration tests for file operations."""
     
-    def test_file_info_integration(self, existing_text_file):
+    def test_file_info_integration(self, existing_json_file):
         """Test file info retrieval with real files."""
-        file_info = FileIOInterface.finfo(fpath=existing_text_file)
+        file_info = FileIOInterface.finfo(fpath=existing_json_file)
         
         # Verify file info contains expected keys
         assert 'size' in file_info
         assert file_info['size'] > 0  # File should have content
         
         # Verify file size matches actual file
-        actual_size = os.path.getsize(existing_text_file)
+        actual_size = os.path.getsize(existing_json_file)
         assert file_info['size'] == actual_size
 
     def test_file_copy_integration(self, existing_json_file, temp_dir):

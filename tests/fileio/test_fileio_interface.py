@@ -7,22 +7,13 @@ This file demonstrates pytest best practices following FIRST principles:
 - Repeatable: Tests produce consistent results using controlled mocks
 - Self-Validating: Clear pass/fail with assertions
 - Timely: Tests written alongside code
-
-Key pytest concepts demonstrated:
-📚 Fixtures: Reusable setup/teardown code (see conftest.py)
-🔄 Parametrize: Run same test with different inputs
-🎭 Mocking: Replace real dependencies with controllable fakes
-🧪 Assertions: Verify expected behavior
-🛡️ Error Testing: Validate error conditions with pytest.raises
 """
 
 import pytest
 import os
-from unittest.mock import patch, MagicMock, call
-from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 from src.main.file_io import FileIOInterface
-from src.main.file_io._base import BaseFileIO
 
 pytestmark = pytest.mark.unit
 

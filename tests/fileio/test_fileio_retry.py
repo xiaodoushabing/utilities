@@ -3,12 +3,6 @@ Test suite for FileIO retry functionality.
 
 These tests validate that the @retry_args decorator works correctly
 with FileIO operations, ensuring robustness in the face of temporary failures.
-
-Retry test areas:
-🔄 Retry decorator functionality
-⏱️ Retry timing and attempts
-🚫 Error handling with retries
-✅ Success after retry attempts
 """
 
 import pytest

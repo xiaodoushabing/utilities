@@ -95,7 +95,6 @@ def sample_text_data():
     """Creates sample text data for testing."""
     return "This is a test file.\nIt contains multiple lines.\nUsed for testing text I/O operations."
 
-
 # ========================================================================================
 # MOCK FIXTURES - CENTRALIZED TO ELIMINATE DUPLICATION
 # ========================================================================================
@@ -129,39 +128,33 @@ def mock_base_fileio(mock_upath):
     with patch('src.main.file_io._base.BaseFileIO') as mock_class:
         mock_instance = MagicMock()
         mock_instance.upath = mock_upath
-        mock_instance.file_extension = "txt"
+        mock_instance.file_extension = mock_upath.suffix.lstrip('.')
         mock_class.return_value = mock_instance
         yield mock_instance
 
 
 @pytest.fixture  
-def mock_fileio_interface():
+def mock_fileio_interface(mock_base_fileio):
     """Creates a mock for FileIOInterface._instantiate method."""
     with patch.object(FileIOInterface, '_instantiate') as mock_instantiate:
-        mock_fileio = MagicMock()
-        mock_instantiate.return_value = mock_fileio
-        yield mock_fileio
+        mock_instantiate.return_value = mock_base_fileio
+        yield mock_base_fileio
 
 
 @pytest.fixture
-def mock_file_operations():
+def mock_file_operations(mock_upath, mock_base_fileio):
     """Mocks common file operations to avoid real file system access."""
     with patch('src.main.file_io.UPath') as mock_upath_class, \
          patch('src.main.file_io.BaseFileIO') as mock_baseio_class:
         
-        mock_upath_instance = MagicMock()
-        mock_upath_instance.exists.return_value = True
-        mock_upath_instance.suffix = ".txt"
-        mock_upath_class.return_value = mock_upath_instance
-        
-        mock_baseio_instance = MagicMock()
-        mock_baseio_class.return_value = mock_baseio_instance
+        mock_upath_class.return_value = mock_upath
+        mock_baseio_class.return_value = mock_base_fileio
         
         yield {
             'upath_class': mock_upath_class,
-            'upath_instance': mock_upath_instance,
+            'upath_instance': mock_upath,
             'baseio_class': mock_baseio_class,
-            'baseio_instance': mock_baseio_instance
+            'baseio_instance': mock_base_fileio
         }
 
 
@@ -183,7 +176,7 @@ def file_extension(request):
     """Parametrized fixture for testing different file extensions.
     
     Covers all supported file extensions from the fileio_mapping:
-    - Text formats: txt, text, log, sql
+    - Text formats: txt, text, log, logs, sql
     - Serializable formats: json, yaml, yml
     - DataFrame formats: csv, parquet, arrow, feather  
     - Pickle formats: pickle, pkl
@@ -232,76 +225,13 @@ def sample_data_by_extension(file_extension, sample_json_data, sample_yaml_data,
 
 
 # ========================================================================================
-# FILE FIXTURES WITH DIFFERENT EXTENSIONS
+# CREATED FILE FIXTURES
 # ========================================================================================
-
-@pytest.fixture
-def csv_file_path(temp_dir):
-    """Provides a CSV file path."""
-    return str(Path(temp_dir) / "test.csv")
-
 
 @pytest.fixture
 def json_file_path(temp_dir):
     """Provides a JSON file path."""
     return str(Path(temp_dir) / "test.json")
-
-
-@pytest.fixture
-def yaml_file_path(temp_dir):
-    """Provides a YAML file path."""
-    return str(Path(temp_dir) / "test.yaml")
-
-
-@pytest.fixture
-def txt_file_path(temp_dir):
-    """Provides a text file path."""
-    return str(Path(temp_dir) / "test.txt")
-
-
-@pytest.fixture
-def parquet_file_path(temp_dir):
-    """Provides a Parquet file path."""
-    return str(Path(temp_dir) / "test.parquet")
-
-
-@pytest.fixture
-def pickle_file_path(temp_dir):
-    """Provides a Pickle file path."""
-    return str(Path(temp_dir) / "test.pkl")
-
-
-@pytest.fixture
-def arrow_file_path(temp_dir):
-    """Provides an Arrow file path."""
-    return str(Path(temp_dir) / "test.arrow")
-
-
-@pytest.fixture
-def feather_file_path(temp_dir):
-    """Provides a Feather file path."""
-    return str(Path(temp_dir) / "test.feather")
-
-
-@pytest.fixture
-def sql_file_path(temp_dir):
-    """Provides a SQL file path."""
-    return str(Path(temp_dir) / "test.sql")
-
-
-@pytest.fixture
-def log_file_path(temp_dir):
-    """Provides a log file path."""
-    return str(Path(temp_dir) / "test.log")
-
-@pytest.fixture
-def logs_file_path(temp_dir):
-    """Provides a log file path."""
-    return str(Path(temp_dir) / "test.logs")
-
-# ========================================================================================
-# CREATED FILE FIXTURES
-# ========================================================================================
 
 @pytest.fixture
 def existing_json_file(json_file_path, sample_json_data):
@@ -310,106 +240,6 @@ def existing_json_file(json_file_path, sample_json_data):
         json.dump(sample_json_data, f)
     return json_file_path
 
-
-@pytest.fixture
-def existing_yaml_file(yaml_file_path, sample_yaml_data):
-    """Creates an actual YAML file for testing read operations."""
-    with open(yaml_file_path, 'w') as f:
-        yaml.dump(sample_yaml_data, f)
-    return yaml_file_path
-
-
-@pytest.fixture
-def existing_text_file(txt_file_path, sample_text_data):
-    """Creates an actual text file for testing read operations."""
-    with open(txt_file_path, 'w') as f:
-        f.write(sample_text_data)
-    return txt_file_path
-
-
-@pytest.fixture
-def existing_csv_file(csv_file_path, sample_dataframe):
-    """Creates an actual CSV file for testing read operations."""
-    sample_dataframe.to_csv(csv_file_path, index=False)
-    return csv_file_path
-
-
-@pytest.fixture
-def existing_parquet_file(parquet_file_path, sample_dataframe):
-    """Creates an actual Parquet file for testing read operations."""
-    sample_dataframe.to_parquet(parquet_file_path, index=False)
-    return parquet_file_path
-
-
-@pytest.fixture
-def existing_feather_file(feather_file_path, sample_dataframe):
-    """Creates an actual Feather file for testing read operations."""
-    sample_dataframe.to_feather(feather_file_path)
-    return feather_file_path
-
-
-@pytest.fixture
-def existing_arrow_file(arrow_file_path, sample_dataframe):
-    """Creates an actual Arrow file for testing read operations."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    
-    table = pa.Table.from_pandas(sample_dataframe)
-    pq.write_table(table, arrow_file_path)
-    return arrow_file_path
-
-
-@pytest.fixture
-def existing_pickle_file(pickle_file_path, sample_json_data):
-    """Creates an actual Pickle file for testing read operations."""
-    import pickle
-    with open(pickle_file_path, 'wb') as f:
-        pickle.dump(sample_json_data, f)
-    return pickle_file_path
-
-
-@pytest.fixture
-def existing_sql_file(sql_file_path):
-    """Creates an actual SQL file for testing read operations."""
-    sql_content = """-- Sample SQL script
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name VARCHAR(100),
-    email VARCHAR(255)
-);
-
-INSERT INTO users (name, email) VALUES 
-    ('Alice', 'alice@example.com'),
-    ('Bob', 'bob@example.com');
-"""
-    with open(sql_file_path, 'w') as f:
-        f.write(sql_content)
-    return sql_file_path
-
-
-@pytest.fixture
-def existing_log_file(log_file_path):
-    """Creates an actual log file for testing read operations."""
-    log_content = """2025-01-01 10:00:00 INFO Starting application
-2025-01-01 10:00:01 DEBUG Database connection established
-2025-01-01 10:00:02 WARNING Retrying failed operation
-2025-01-01 10:00:03 ERROR Operation failed after 3 retries
-"""
-    with open(log_file_path, 'w') as f:
-        f.write(log_content)
-    return log_file_path
-
-@pytest.fixture
-def existing_logs_file(logs_file_path):
-    """Creates an actual logs file for testing read operations."""
-    logs_content = """2025-01-01 10:00:00 INFO Starting application
-2025-01-01 10:00:01 DEBUG Database connection established
-2025-01-01 10:00:02 WARNING Retrying failed operation
-2025-01-01 10:00:03 ERROR Operation failed after 3 retries
-"""
-    with open(logs_file_path, 'w') as f:
-        f.write(logs_content)
-    return logs_file_path
 
 # ========================================================================================
 # RETRY TESTING FIXTURES
