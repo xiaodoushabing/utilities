@@ -96,19 +96,20 @@ def sample_text_data():
     return "This is a test file.\nIt contains multiple lines.\nUsed for testing text I/O operations."
 
 # ========================================================================================
-# MOCK FIXTURES - CENTRALIZED TO ELIMINATE DUPLICATION
+# MOCK FIXTURES
 # ========================================================================================
 
 @pytest.fixture
-def mock_upath():
+def mock_upath(mock_file_context):
     """Creates a mock UPath object for testing."""
     mock_upath = MagicMock()
     mock_upath.path = "/test/path/file.txt"
     mock_upath.suffix = ".txt"
     mock_upath.exists.return_value = True
     
-    # Mock filesystem
+    # Set up the file system mock to return our mock file context
     mock_fs = MagicMock()
+    mock_fs.open.return_value.__enter__.return_value = mock_file_context
     mock_upath.fs = mock_fs
     
     return mock_upath
@@ -121,6 +122,34 @@ def mock_fsspec():
         mock_protocols.return_value = ['file', 's3', 'gcs', 'hdfs', 'http', 'https']
         yield mock_protocols
 
+
+@pytest.fixture
+def mock_fileio_mapping():
+    """
+    Mocks the fileio_mapping dictionary used in BaseFileIO._fread and _fwrite methods.
+    
+    Returns a context manager that provides a mock file IO class with configurable behavior.
+    """
+    with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
+        # Create a mock file IO class that can be configured per test
+        mock_io_class = MagicMock()
+        mock_mapping.__contains__.return_value = True
+        mock_mapping.__getitem__.return_value = mock_io_class
+        yield mock_io_class
+
+@pytest.fixture
+def mock_file_context():
+    """
+    Provides a reusable mock file object with context manager support.
+    """
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"default test content"
+    mock_file.__enter__ = MagicMock(return_value=mock_file)
+    mock_file.__exit__ = MagicMock(return_value=None)
+    
+    # Reset the mock between tests to prevent state leakage
+    yield mock_file
+    mock_file.reset_mock()
 
 @pytest.fixture
 def mock_base_fileio(mock_upath):

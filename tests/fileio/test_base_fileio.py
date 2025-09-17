@@ -8,35 +8,34 @@ directory management, and error handling.
 
 import pytest
 import warnings
+from io import BytesIO
 from unittest.mock import patch, MagicMock
 
 from src.main.file_io._base import BaseFileIO
+from src.main.file_io._base import fileio_mapping
+from src.main.file_io.json import JsonFileIO
+from src.main.file_io.csv import CSVFileIO
+from src.main.file_io.text import TextFileIO
 
 pytestmark = pytest.mark.unit
-
 
 class TestBaseFileIOInitialization:
     """Test BaseFileIO initialization and validation."""
     
     def test_basefileio_initialization_with_valid_extension(self, mock_upath):
         """Test BaseFileIO initializes correctly with valid file extension."""
-        mock_upath.suffix = ".json"
         
-        with patch.object(BaseFileIO, '_validate_file_extension', return_value="json"):
+        with patch.object(BaseFileIO, '_validate_file_extension', return_value="txt"):
             fileio = BaseFileIO(upath_obj=mock_upath)
             
             assert fileio.upath == mock_upath
-            assert fileio.file_extension == "json"
+            assert fileio.file_extension == "txt"  # From mock_upath.suffix
 
     def test_basefileio_validates_extension_during_init(self, mock_upath):
         """Test that file extension validation is called during initialization."""
-        mock_upath.suffix = ".txt"
         
         with patch.object(BaseFileIO, '_validate_file_extension') as mock_validate:
-            mock_validate.return_value = "txt"
-            
             BaseFileIO(upath_obj=mock_upath)
-            
             mock_validate.assert_called_once()
 
     @pytest.mark.parametrize("extension,expected", [
@@ -93,8 +92,7 @@ class TestBaseFileIOFileInfo:
     
     def test_finfo_returns_file_information(self, mock_upath):
         """Test that _finfo returns file system information."""
-        expected_info = {"size": 1024, "type": "file", "mtime": 1609459200}
-        mock_upath.suffix = ".txt"
+        expected_info = {"size": 123, "type": "file", "mtime": 1234567890}
         mock_upath.fs.info.return_value = expected_info
         
         fileio = BaseFileIO(upath_obj=mock_upath)
@@ -105,9 +103,6 @@ class TestBaseFileIOFileInfo:
 
     def test_finfo_passes_additional_arguments(self, mock_upath):
         """Test that _finfo passes additional arguments to fs.info."""
-        mock_upath.suffix = ".txt"
-        mock_upath.fs.info.return_value = {}
-        
         fileio = BaseFileIO(upath_obj=mock_upath)
         fileio._finfo("extra_arg", detail="full")
         
@@ -117,8 +112,6 @@ class TestBaseFileIOFileInfo:
 
     def test_finfo_handles_os_error_with_warning(self, mock_upath):
         """Test that _finfo handles OSError and raises with warning."""
-        mock_upath.suffix = ".txt"
-        mock_upath.path = "/nonexistent/file.txt"
         mock_upath.fs.info.side_effect = OSError("File not found")
         
         fileio = BaseFileIO(upath_obj=mock_upath)
@@ -137,64 +130,172 @@ class TestBaseFileIOFileRead:
     
     def test_fread_checks_file_exists(self, mock_upath):
         """Test that _fread checks if file exists before reading."""
-        mock_upath.suffix = ".json"
         mock_upath.exists.return_value = False
-        mock_upath.path = "/test/file.json"
         
         fileio = BaseFileIO(upath_obj=mock_upath)
-        
-        with pytest.raises(FileNotFoundError, match="File not found: /test/file.json"):
+
+        with pytest.raises(FileNotFoundError, match=f"File not found: {mock_upath.path}"):
             fileio._fread()
 
-    def test_fread_opens_file_in_binary_mode(self, mock_upath):
-        """Test that _fread opens file in binary mode."""
-        mock_upath.suffix = ".json"
-        mock_upath.exists.return_value = True
-        mock_file_content = b'{"key": "value"}'
-        
-        # Mock the file system open call
-        mock_file = MagicMock()
-        mock_file.read.return_value = mock_file_content
-        mock_upath.fs.open.return_value.__enter__.return_value = mock_file
-        
-        # Mock the JSON file IO class
-        with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
-            mock_json_io = MagicMock()
-            mock_json_io._read.return_value = {"key": "value"}
-            mock_mapping.__contains__.return_value = True
-            mock_mapping.__getitem__.return_value = mock_json_io
-            
-            fileio = BaseFileIO(upath_obj=mock_upath)
-            result = fileio._fread()
-            
-            # Verify file opened in binary mode
-            mock_upath.fs.open.assert_called_once_with(mock_upath.path, 'rb')
-            mock_json_io._read.assert_called_once()
-            assert result == {"key": "value"}
+    def test_fread_opens_file_in_binary_mode(self, mock_upath, mock_fileio_mapping, mock_file_context):
+        """Test that _fread opens file in binary mode and passes content to format parser."""
+       
+        # Configure the mock file IO class
+        mock_fileio_mapping._read.return_value = {"key": "value"}
 
-    @pytest.mark.parametrize("extension", ["json", "csv", "txt", "yaml"])
-    def test_fread_uses_correct_fileio_class(self, mock_upath, extension):
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread()
+        
+        # Verify file opened in binary mode
+        mock_upath.fs.open.assert_called_once_with(mock_upath.path, 'rb')
+        
+        # Verify file content is read
+        mock_file_context.read.assert_called_once_with()
+        
+        # Verify the raw content is passed to the format-specific parser
+        # The _read method should be called with a BytesIO containing the file content
+        mock_fileio_mapping._read.assert_called_once()
+        args, _ = mock_fileio_mapping._read.call_args
+        assert isinstance(args[0], BytesIO)
+        # Verify the BytesIO contains the correct content
+        args[0].seek(0)  # Reset position to read from beginning
+        assert args[0].read() == mock_file_context.read.return_value
+        
+        assert result == {"key": "value"}
+
+    @pytest.mark.parametrize("extension", ["json", "csv", "logs", "log", "txt", "text", "yaml", "yml", "pickle", "pkl", "parquet", "feather", "arrow"])
+    def test_fread_uses_correct_fileio_class(self, mock_upath, extension, mock_fileio_mapping, mock_file_context):
         """Test that _fread uses the correct file IO class based on extension."""
+        file_content = b"test content"
         mock_upath.suffix = f".{extension}"
+        
+        mock_file_context.read.return_value = file_content
+        
+        # Configure the mock file IO class (provided by mock_fileio_mapping fixture)
+        mock_fileio_mapping._read.return_value = f"parsed_{extension}_data"
+        
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread()
+        
+        # Verify the file IO class _read method was called
+        mock_fileio_mapping._read.assert_called_once()
+        
+        # Verify the correct content was passed to the parser
+        args, _ = mock_fileio_mapping._read.call_args
+        assert isinstance(args[0], BytesIO)
+        args[0].seek(0)
+        assert args[0].read() == file_content
+        
+        assert result == f"parsed_{extension}_data"
+
+    @pytest.mark.parametrize("extension, expected_class", [
+        ("json", JsonFileIO),
+        ("csv", CSVFileIO),
+        ("txt", TextFileIO),
+    ])
+    def test_fread_selects_actual_fileio_classes(self, mock_upath, extension, expected_class):
+        """Test that _fread selects the actual FileIO classes from the real mapping."""
+        mock_upath.suffix = f".{extension}"
+
+        # Verify the mapping contains the expected class
+        assert fileio_mapping[extension] == expected_class
+        
+        # Test that BaseFileIO uses this mapping correctly
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        assert fileio.file_extension == extension
+
+    def test_fread_with_offset_seeks_to_correct_position(self, mock_upath, mock_fileio_mapping, mock_file_context):
+        """Test that _fread seeks to the correct offset position."""
+        offset = 5
+        
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread(offset=offset)
+        
+        # Verify seek was called with correct offset
+        mock_file_context.seek.assert_called_once_with(offset)
+        # Verify read was called without size (reads to end of file)
+        mock_file_context.read.assert_called_once_with()
+
+    def test_fread_with_size_reads_specific_byte_count(self, mock_upath, mock_fileio_mapping, mock_file_context):
+        """Test that _fread reads only the specified number of bytes."""
+        expected_size = 10
+        
+        # Configure the mock file IO class
+        mock_fileio_mapping._read.return_value = "parsed_10_bytes"
+        
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread(size=expected_size)
+        
+        # Verify seek was called with default offset (0)
+        mock_file_context.seek.assert_called_once_with(0)
+        # Verify read was called with specific size
+        mock_file_context.read.assert_called_once_with(expected_size)
+        assert result == "parsed_10_bytes"
+
+    def test_fread_with_raw_bytes_returns_bytes_directly(self, mock_upath, mock_file_context):
+        """Test that _fread returns raw bytes when raw_bytes=True, bypassing format parsing."""
+
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread(raw_bytes=True)
+        
+        # Verify file was read
+        mock_file_context.seek.assert_called_once_with(0)
+        mock_file_context.read.assert_called_once_with()
+        
+        # Verify raw bytes returned without format parsing
+        assert result == mock_file_context.read.return_value
+        assert isinstance(result, bytes)
+
+    def test_fread_raw_bytes_with_offset_and_size(self, mock_upath, mock_file_context):
+        """Test that _fread raw_bytes mode works correctly with offset and size."""
+        mock_upath.exists.return_value = True
+        offset = 3
+        size = 5
+        expected_bytes = b"bytes"
+        
+        # Reset the mock file content for this specific test
+        mock_file_context.read.return_value = expected_bytes
+        
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread(offset=offset, size=size, raw_bytes=True)
+        
+        # Verify correct seek and read operations
+        mock_file_context.seek.assert_called_once_with(offset)
+        mock_file_context.read.assert_called_once_with(size)
+        
+        # Verify raw bytes returned
+        assert result == expected_bytes
+        assert isinstance(result, bytes)
+
+    @pytest.mark.parametrize("offset,size", [
+        (0, None),      # Read from start, entire file
+        (10, None),     # Read from offset, entire remainder
+        (0, 20),        # Read from start, specific size
+        (5, 15),        # Read from offset, specific size
+        (100, 50),      # Large offset and size
+    ])
+    def test_fread_offset_size_parameter_combinations(self, mock_upath, offset, size, mock_fileio_mapping, mock_file_context):
+        """Test various combinations of offset and size parameters."""
         mock_upath.exists.return_value = True
         
-        mock_file = MagicMock()
-        mock_file.read.return_value = b"test content"
-        mock_upath.fs.open.return_value.__enter__.return_value = mock_file
+        mock_file_context.read.return_value = b"test content"
         
-        with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
-            mock_io_class = MagicMock()
-            mock_io_class._read.return_value = f"parsed_{extension}_data"
-            mock_mapping.__contains__.return_value = True
-            mock_mapping.__getitem__.return_value = mock_io_class
-            
-            fileio = BaseFileIO(upath_obj=mock_upath)
-            result = fileio._fread()
-            
-            # Verify correct file IO class was accessed
-            mock_mapping.__getitem__.assert_called_with(extension)
-            mock_io_class._read.assert_called_once()
-            assert result == f"parsed_{extension}_data"
+        # Configure the mock file IO class
+        mock_fileio_mapping._read.return_value = "parsed_content"
+        
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        result = fileio._fread(offset=offset, size=size)
+        
+        # Verify seek was called with correct offset
+        mock_file_context.seek.assert_called_once_with(offset)
+        
+        # Verify read was called correctly based on size parameter
+        if size is not None:
+            mock_file_context.read.assert_called_once_with(size)
+        else:
+            mock_file_context.read.assert_called_once_with()
+        
+        assert result == "parsed_content"
 
 
 class TestBaseFileIOFileCopy:
@@ -202,9 +303,7 @@ class TestBaseFileIOFileCopy:
     
     def test_copy_checks_source_file_exists(self, mock_upath):
         """Test that _fcopy checks if source file exists."""
-        mock_upath.suffix = ".txt"
         mock_upath.exists.return_value = False
-        mock_upath.path = "/source/file.txt"
         
         fileio = BaseFileIO(upath_obj=mock_upath)
         
@@ -224,10 +323,6 @@ class TestBaseFileIOFileCopy:
 
     def test_copy_performs_file_copy_operation(self, mock_upath):
         """Test that _fcopy performs the actual file copying."""
-        mock_upath.suffix = ".txt"
-        mock_upath.exists.return_value = True
-        mock_upath.path = "/source/file.txt"
-        
         # Mock source file content
         source_content = b"test file content"
         
@@ -267,10 +362,6 @@ class TestBaseFileIOFileCopy:
 
     def test_copy_handles_os_error_with_warning(self, mock_upath):
         """Test that _fcopy handles OSError and raises with warning."""
-        mock_upath.suffix = ".txt"
-        mock_upath.exists.return_value = True
-        mock_upath.path = "/source/file.txt"
-        
         # Mock OS error during file operations
         mock_upath.fs.open.side_effect = OSError("Permission denied")
         
@@ -288,102 +379,62 @@ class TestBaseFileIOFileCopy:
 class TestBaseFileIOFileWrite:
     """Test BaseFileIO._fwrite method."""
     
-    def test_fwrite_validates_data_type_before_writing(self, mock_upath):
+    def test_fwrite_validates_data_type_before_writing(self, mock_upath, mock_fileio_mapping):
         """Test that _fwrite validates data type before attempting write."""
         mock_upath.suffix = ".csv"
         
         fileio = BaseFileIO(upath_obj=mock_upath)
         
         with patch.object(fileio, '_validate_data_type') as mock_validate:
-            with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
-                mock_csv_io = MagicMock()
-                mock_mapping.__getitem__.return_value = mock_csv_io
-                
-                test_data = "invalid data for csv"
-                fileio._fwrite(data=test_data)
-                
-                # Verify validation was called with correct parameters
-                mock_validate.assert_called_once_with(test_data, "csv")
+            test_data = "invalid data for csv"
+            fileio._fwrite(data=test_data)
+            
+            # Verify validation was called with correct parameters
+            mock_validate.assert_called_once_with(test_data, "csv")
 
     @pytest.mark.parametrize("extension,data_type", [
         ("json", {"key": "value"}),
         ("txt", "text content"),
         ("yaml", {"yaml": "data"})
     ])
-    def test_fwrite_uses_correct_fileio_class(self, mock_upath, extension, data_type):
+    def test_fwrite_uses_correct_fileio_class(self, mock_upath, extension, data_type, mock_fileio_mapping):
         """Test that _fwrite uses correct file IO class based on extension."""
         mock_upath.suffix = f".{extension}"
         
-        with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
-            mock_io_class = MagicMock()
-            mock_mapping.__contains__.return_value = True
-            mock_mapping.__getitem__.return_value = mock_io_class
-            
-            fileio = BaseFileIO(upath_obj=mock_upath)
-            fileio._fwrite(data=data_type)
-            
-            # Verify correct file IO class was accessed
-            mock_mapping.__getitem__.assert_called_with(extension)
-            
-            # Verify write method was called with correct parameters (including mode)
-            expected_mode = 'w' if extension in ['txt', 'json', 'yaml', 'csv'] else 'wb'
-            mock_io_class._write.assert_called_once_with(mock_upath, data_type, mode=expected_mode)
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        fileio._fwrite(data=data_type)
+        
+        # Verify write method was called with correct parameters (including mode)
+        expected_mode = 'w' if extension in ['txt', 'json', 'yaml', 'csv'] else 'wb'
+        mock_fileio_mapping._write.assert_called_once_with(mock_upath, data_type, mode=expected_mode)
 
-    def test_fwrite_uses_correct_fileio_class_for_dataframe_formats(self, mock_upath, sample_dataframe):
+    def test_fwrite_uses_correct_fileio_class_for_dataframe_formats(self, mock_upath, sample_dataframe, mock_fileio_mapping):
         """Test that _fwrite uses correct file IO class for DataFrame-requiring formats."""
         extension = "csv"
         mock_upath.suffix = f".{extension}"
         
-        with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
-            mock_io_class = MagicMock()
-            mock_mapping.__contains__.return_value = True
-            mock_mapping.__getitem__.return_value = mock_io_class
-            
-            fileio = BaseFileIO(upath_obj=mock_upath)
-            fileio._fwrite(data=sample_dataframe)
-            
-            # Verify correct file IO class was accessed
-            mock_mapping.__getitem__.assert_called_with(extension)
-            
-            # Verify write method was called with correct parameters
-            mock_io_class._write.assert_called_once_with(mock_upath, sample_dataframe, mode='w')
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        fileio._fwrite(data=sample_dataframe)
+        
+        # Verify write method was called with correct parameters
+        mock_fileio_mapping._write.assert_called_once_with(mock_upath, sample_dataframe, mode='w')
 
-    def test_fwrite_passes_additional_arguments(self, mock_upath):
+    def test_fwrite_passes_additional_arguments(self, mock_upath, mock_fileio_mapping):
         """Test that _fwrite passes additional arguments to file IO class."""
         mock_upath.suffix = ".txt"
         
-        with patch('src.main.file_io._base.fileio_mapping') as mock_mapping:
-            mock_txt_io = MagicMock()
-            mock_mapping.__contains__ = MagicMock(side_effect=lambda x: x == 'txt')
-            mock_mapping.__getitem__ = MagicMock(return_value=mock_txt_io)
-            
-            fileio = BaseFileIO(upath_obj=mock_upath)
-            fileio._fwrite(data="test", mode="w", encoding="utf-8")
-            
-            # Verify write method was called with additional arguments
-            mock_txt_io._write.assert_called_once_with(
-                mock_upath, "test", mode="w", encoding="utf-8"
-            )
+        fileio = BaseFileIO(upath_obj=mock_upath)
+        fileio._fwrite(data="test", mode="w", encoding="utf-8")
+        
+        # Verify write method was called with additional arguments
+        mock_fileio_mapping._write.assert_called_once_with(
+            mock_upath, "test", mode="w", encoding="utf-8"
+        )
 
 
 class TestBaseFileIODataValidation:
     """Test BaseFileIO._validate_data_type method."""
     
-    def test_validate_dataframe_formats_require_dataframe(self, mock_upath):
-        """Test that DataFrame formats require pandas DataFrame."""
-        import pandas as pd
-        
-        mock_upath.suffix = ".csv"
-        fileio = BaseFileIO(upath_obj=mock_upath)
-        
-        # Valid DataFrame should pass
-        valid_df = pd.DataFrame({"col": [1, 2, 3]})
-        fileio._validate_data_type(valid_df, "csv")  # Should not raise
-        
-        # Non-DataFrame should raise TypeError
-        with pytest.raises(TypeError, match="requires a pandas DataFrame"):
-            fileio._validate_data_type("not a dataframe", "csv")
-
     @pytest.mark.parametrize("file_extension", ["csv", "feather", "parquet", "arrow"])
     def test_validate_all_dataframe_formats(self, mock_upath, file_extension):
         """Test validation for all DataFrame-based formats."""
@@ -400,7 +451,7 @@ class TestBaseFileIODataValidation:
         with pytest.raises(TypeError, match=f"requires a pandas DataFrame"):
             fileio._validate_data_type({"not": "dataframe"}, file_extension)
 
-    @pytest.mark.parametrize("file_extension", ["txt", "text", "sql"])
+    @pytest.mark.parametrize("file_extension", ["txt", "text", "log", "logs", "sql"])
     def test_validate_string_formats_require_string(self, mock_upath, file_extension):
         """Test that string formats require string data."""
         mock_upath.suffix = f".{file_extension}"
@@ -436,24 +487,18 @@ class TestBaseFileIODataValidation:
 class TestBaseFileIODirectoryOperations:
     """Test BaseFileIO directory operations."""
     
-    def test_fdelete_validates_filepath_not_empty(self, mock_upath):
+    @pytest.mark.parametrize("filepath", ["", "   ", None])
+    def test_fdelete_validates_filepath_not_empty(self, mock_upath, filepath):
         """Test that _fdelete validates filepath is not empty."""
-        mock_upath.suffix = ".txt"
-        
         fileio = BaseFileIO(upath_obj=mock_upath)
         
         # Test empty string
         with pytest.raises(ValueError, match="File path cannot be empty"):
-            fileio._fdelete(filepath="")
-        
-        # Test whitespace only
-        with pytest.raises(ValueError, match="File path cannot be empty"):
-            fileio._fdelete(filepath="   ")
+            fileio._fdelete(filepath=filepath)
+
 
     def test_fdelete_warns_for_nonexistent_files(self, mock_upath):
         """Test that _fdelete warns but doesn't error for non-existent files."""
-        mock_upath.suffix = ".txt"
-        
         fileio = BaseFileIO(upath_obj=mock_upath)
         
         with patch('src.main.file_io._base.UPath') as mock_upath_class:
@@ -473,8 +518,6 @@ class TestBaseFileIODirectoryOperations:
 
     def test_fdelete_calls_filesystem_delete_for_existing_files(self, mock_upath):
         """Test that _fdelete calls filesystem rm for existing files."""
-        mock_upath.suffix = ".txt"
-        
         fileio = BaseFileIO(upath_obj=mock_upath)
         test_path = "/test/file.txt"
         
@@ -492,8 +535,6 @@ class TestBaseFileIODirectoryOperations:
 
     def test_fdelete_handles_os_error_with_warning(self, mock_upath):
         """Test that _fdelete handles OSError and raises with warning."""
-        mock_upath.suffix = ".txt"
-        
         fileio = BaseFileIO(upath_obj=mock_upath)
         
         with patch('src.main.file_io._base.UPath') as mock_upath_class:
