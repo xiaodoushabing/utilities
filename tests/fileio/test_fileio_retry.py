@@ -25,10 +25,10 @@ class TestFileIORetryFunctionality:
         # The wrapper function should have a __wrapped__ attribute pointing to original
         assert hasattr(method, '__wrapped__'), f"Method {method_name} should have retry decorator"
 
-    def test_retry_with_custom_attempts_and_wait(self, mock_retry_decorator, mock_fileio_interface):
+    def test_retry_with_custom_attempts_and_wait(self, mock_retry_decorator, mock_instantiate):
         """Test that custom retry parameters are passed correctly."""
-        mock_fileio_interface._finfo.return_value = {"size": 100}
-        
+        mock_instantiate['fileio']._finfo.return_value = {"size": 100}
+
         # Call with custom retry parameters
         FileIOInterface.finfo(
             fpath="/test/file.txt",
@@ -44,21 +44,21 @@ class TestFileIORetryFunctionality:
         assert 'stop' in call_kwargs
         assert 'wait' in call_kwargs
 
-    def test_retry_on_transient_failure_then_success(self, mock_fsspec, failing_then_succeeding_operation):
+    def test_retry_on_transient_failure_then_success(self, mock_fsspec, mock_instantiate, failing_then_succeeding_operation):
         """Test retry behavior when operation fails then succeeds."""
         
         def mock_retry_call(func, *args, **kwargs):
             # Simulate retry logic
             max_attempts = 3
             last_exception = None
-            
-            for attempt in range(max_attempts):
+
+            for attempt in range(1, max_attempts + 1):
                 try:
                     result = failing_then_succeeding_operation(*args, **kwargs)
                     return result  # Success - return the result
                 except OSError as e:
                     last_exception = e
-                    if attempt == max_attempts - 1:
+                    if attempt == max_attempts:
                         raise e
                     continue
             
@@ -80,9 +80,9 @@ class TestFileIORetryFunctionality:
                 assert result == "Success"
 
     @patch('src.main._aux._aux.Retrying', None)  # Simulate tenacity not installed
-    def test_retry_gracefully_handles_missing_tenacity(self, mock_fsspec, mock_fileio_interface):
+    def test_retry_gracefully_handles_missing_tenacity(self, mock_fsspec, mock_instantiate):
         """Test that operations work even when tenacity is not available."""
-        mock_fileio_interface._finfo.return_value = {"size": 100}
+        mock_instantiate['fileio']._finfo.return_value = {"size": 100}
         
         # Should work without retry functionality
         result = FileIOInterface.finfo(fpath="/test/file.txt")
