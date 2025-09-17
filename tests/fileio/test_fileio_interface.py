@@ -516,13 +516,27 @@ class TestFileIOInterfaceParametrized:
             FileIOInterface.fdelete(**kwargs)
 
     @pytest.mark.parametrize("file_extension", [
-        "csv", "txt", "json", "yaml", "yml", "parquet", "feather", "arrow", "pickle", "pkl"
+        # Text-based formats (require string data)
+        "txt", "text", "log", "logs", "sql",
+        # JSON/YAML formats (require serializable data)  
+        "json", "yaml", "yml",
+        # DataFrame formats (require pandas DataFrame)
+        "csv", "parquet", "arrow", "feather",
+        # Pickle formats (can handle any serializable data)
+        "pickle", "pkl"
     ])
     def test_interface_supports_all_file_types(self, mock_fsspec, file_extension):
         """Test that interface works with all supported file extensions.
         
         PYTEST: This parametrized test verifies that the interface
-        can handle all file types that should be supported.
+        can handle all file types that should be supported based on
+        the fileio_mapping in _base.py.
+        
+        Coverage includes:
+        - Text formats: txt, text, log, logs, sql
+        - Serializable formats: json, yaml, yml
+        - DataFrame formats: csv, parquet, arrow, feather  
+        - Pickle formats: pickle, pkl
         """
         test_path = f"/test/file.{file_extension}"
         

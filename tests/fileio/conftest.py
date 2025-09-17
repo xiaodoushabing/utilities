@@ -13,12 +13,9 @@ import json
 import yaml
 import pandas as pd
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
-from io import BytesIO
+from unittest.mock import patch, MagicMock
 
 from src.main.file_io import FileIOInterface
-from src.main.file_io._base import BaseFileIO
-
 
 # ========================================================================================
 # TEMPORARY DIRECTORY FIXTURES
@@ -172,9 +169,25 @@ def mock_file_operations():
 # PARAMETRIZED FIXTURES FOR TESTING MULTIPLE FILE FORMATS
 # ========================================================================================
 
-@pytest.fixture(params=['json', 'yaml', 'txt', 'csv', 'parquet', 'pkl'])
+@pytest.fixture(params=[
+    # Text-based formats (require string data)
+    'txt', 'text', 'log', 'logs', 'sql',
+    # JSON/YAML formats (require serializable data)
+    'json', 'yaml', 'yml',
+    # DataFrame formats (require pandas DataFrame)
+    'csv', 'parquet', 'arrow', 'feather',
+    # Pickle formats (can handle any serializable data)
+    'pickle', 'pkl'
+])
 def file_extension(request):
-    """Parametrized fixture for testing different file extensions."""
+    """Parametrized fixture for testing different file extensions.
+    
+    Covers all supported file extensions from the fileio_mapping:
+    - Text formats: txt, text, log, sql
+    - Serializable formats: json, yaml, yml
+    - DataFrame formats: csv, parquet, arrow, feather  
+    - Pickle formats: pickle, pkl
+    """
     return request.param
 
 
@@ -187,16 +200,35 @@ def file_path_by_extension(temp_dir, file_extension):
 @pytest.fixture
 def sample_data_by_extension(file_extension, sample_json_data, sample_yaml_data, 
                            sample_text_data, sample_dataframe):
-    """Provides appropriate sample data based on file extension."""
-    data_mapping = {
-        'json': sample_json_data,
-        'yaml': sample_yaml_data,
-        'txt': sample_text_data,
-        'csv': sample_dataframe,
-        'parquet': sample_dataframe,
-        'pkl': sample_json_data  # pickle can handle any serializable data
-    }
-    return data_mapping[file_extension]
+    """Provides appropriate sample data based on file extension.
+    
+    Maps each file extension to the correct data type:
+    - Text formats (txt, text, log, logs, sql): string data
+    - Serializable formats (json, yaml, yml): dict/list data
+    - DataFrame formats (csv, parquet, arrow, feather): pandas DataFrame
+    - Pickle formats (pickle, pkl): any serializable data (using dict here)
+    """
+    # Text-based formats require string data
+    text_formats = {'txt', 'text', 'log', 'logs','sql'}
+    # DataFrame formats require pandas DataFrame
+    dataframe_formats = {'csv', 'parquet', 'arrow', 'feather'}
+    # JSON/YAML formats work with serializable data (dict/list)
+    serializable_formats = {'json', 'yaml', 'yml'}
+    # Pickle formats can handle any serializable data
+    pickle_formats = {'pickle', 'pkl'}
+    
+    if file_extension in text_formats:
+        return sample_text_data
+    elif file_extension in dataframe_formats:
+        return sample_dataframe
+    elif file_extension in serializable_formats:
+        # Use YAML data for JSON (both support dicts/lists)
+        return sample_yaml_data if file_extension in {'yaml', 'yml'} else sample_json_data
+    elif file_extension in pickle_formats:
+        # Pickle can handle any data type - use complex nested data
+        return sample_json_data
+    else:
+        raise ValueError(f"Unsupported file extension for test data: {file_extension}")
 
 
 # ========================================================================================
@@ -239,8 +271,36 @@ def pickle_file_path(temp_dir):
     return str(Path(temp_dir) / "test.pkl")
 
 
+@pytest.fixture
+def arrow_file_path(temp_dir):
+    """Provides an Arrow file path."""
+    return str(Path(temp_dir) / "test.arrow")
+
+
+@pytest.fixture
+def feather_file_path(temp_dir):
+    """Provides a Feather file path."""
+    return str(Path(temp_dir) / "test.feather")
+
+
+@pytest.fixture
+def sql_file_path(temp_dir):
+    """Provides a SQL file path."""
+    return str(Path(temp_dir) / "test.sql")
+
+
+@pytest.fixture
+def log_file_path(temp_dir):
+    """Provides a log file path."""
+    return str(Path(temp_dir) / "test.log")
+
+@pytest.fixture
+def logs_file_path(temp_dir):
+    """Provides a log file path."""
+    return str(Path(temp_dir) / "test.logs")
+
 # ========================================================================================
-# CREATED FILE FIXTURES (Files that actually exist) - FOR INTEGRATION TESTS
+# CREATED FILE FIXTURES
 # ========================================================================================
 
 @pytest.fixture
@@ -273,6 +333,83 @@ def existing_csv_file(csv_file_path, sample_dataframe):
     sample_dataframe.to_csv(csv_file_path, index=False)
     return csv_file_path
 
+
+@pytest.fixture
+def existing_parquet_file(parquet_file_path, sample_dataframe):
+    """Creates an actual Parquet file for testing read operations."""
+    sample_dataframe.to_parquet(parquet_file_path, index=False)
+    return parquet_file_path
+
+
+@pytest.fixture
+def existing_feather_file(feather_file_path, sample_dataframe):
+    """Creates an actual Feather file for testing read operations."""
+    sample_dataframe.to_feather(feather_file_path)
+    return feather_file_path
+
+
+@pytest.fixture
+def existing_arrow_file(arrow_file_path, sample_dataframe):
+    """Creates an actual Arrow file for testing read operations."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    
+    table = pa.Table.from_pandas(sample_dataframe)
+    pq.write_table(table, arrow_file_path)
+    return arrow_file_path
+
+
+@pytest.fixture
+def existing_pickle_file(pickle_file_path, sample_json_data):
+    """Creates an actual Pickle file for testing read operations."""
+    import pickle
+    with open(pickle_file_path, 'wb') as f:
+        pickle.dump(sample_json_data, f)
+    return pickle_file_path
+
+
+@pytest.fixture
+def existing_sql_file(sql_file_path):
+    """Creates an actual SQL file for testing read operations."""
+    sql_content = """-- Sample SQL script
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(255)
+);
+
+INSERT INTO users (name, email) VALUES 
+    ('Alice', 'alice@example.com'),
+    ('Bob', 'bob@example.com');
+"""
+    with open(sql_file_path, 'w') as f:
+        f.write(sql_content)
+    return sql_file_path
+
+
+@pytest.fixture
+def existing_log_file(log_file_path):
+    """Creates an actual log file for testing read operations."""
+    log_content = """2025-01-01 10:00:00 INFO Starting application
+2025-01-01 10:00:01 DEBUG Database connection established
+2025-01-01 10:00:02 WARNING Retrying failed operation
+2025-01-01 10:00:03 ERROR Operation failed after 3 retries
+"""
+    with open(log_file_path, 'w') as f:
+        f.write(log_content)
+    return log_file_path
+
+@pytest.fixture
+def existing_logs_file(logs_file_path):
+    """Creates an actual logs file for testing read operations."""
+    logs_content = """2025-01-01 10:00:00 INFO Starting application
+2025-01-01 10:00:01 DEBUG Database connection established
+2025-01-01 10:00:02 WARNING Retrying failed operation
+2025-01-01 10:00:03 ERROR Operation failed after 3 retries
+"""
+    with open(logs_file_path, 'w') as f:
+        f.write(logs_content)
+    return logs_file_path
 
 # ========================================================================================
 # RETRY TESTING FIXTURES

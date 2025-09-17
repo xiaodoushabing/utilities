@@ -29,14 +29,50 @@ pytestmark = pytest.mark.integration
 class TestFileIOIntegrationRoundtrip:
     """Integration tests for complete write-read cycles using parametrization."""
     
+    def test_comprehensive_format_roundtrip_integration(self, file_path_by_extension, 
+                                                       sample_data_by_extension, file_extension):
+        """Test complete write-read cycle for ALL supported file formats.
+        
+        This test uses the comprehensive file_extension fixture that covers:
+        - Text formats: txt, text, log, logs, sql (string data)
+        - Serializable formats: json, yaml, yml (dict/list data)  
+        - DataFrame formats: csv, parquet, arrow, feather (DataFrame data)
+        - Pickle formats: pickle, pkl (any serializable data)
+        """
+        # Write data to file
+        if file_extension == 'csv':
+            # For CSV, write without index to ensure clean comparison
+            FileIOInterface.fwrite(write_path=file_path_by_extension, data=sample_data_by_extension, index=False)
+        else:
+            FileIOInterface.fwrite(write_path=file_path_by_extension, data=sample_data_by_extension)
+        
+        # Verify file was created
+        assert os.path.exists(file_path_by_extension)
+        
+        # Read data back from file
+        read_data = FileIOInterface.fread(read_path=file_path_by_extension)
+        
+        # Verify data roundtrip is correct
+        # Handle different data types and formats appropriately
+        if file_extension in {'txt', 'text', 'log', 'logs', 'sql'}:
+            # Text files: normalize line endings for cross-platform compatibility
+            expected_data = sample_data_by_extension.replace('\n', '\r\n') if '\r\n' not in sample_data_by_extension else sample_data_by_extension
+            assert read_data == expected_data
+        elif file_extension in {'csv', 'parquet', 'arrow', 'feather'}:
+            # DataFrame formats: compare DataFrames
+            pd.testing.assert_frame_equal(read_data, sample_data_by_extension)
+        else:
+            # JSON, YAML, Pickle formats: direct comparison
+            assert read_data == sample_data_by_extension
+
     @pytest.mark.parametrize("file_extension", ["json", "yaml", "txt"])
     def test_text_based_format_roundtrip_integration(self, file_path_by_extension, 
                                                    sample_data_by_extension, file_extension):
-        """Test complete write-read cycle for text-based formats."""
-        # Skip CSV and Parquet as they require DataFrame data
-        if file_extension in ["csv", "parquet", "pkl"]:
-            pytest.skip(f"Skipping {file_extension} for text-based test")
-            
+        """Test complete write-read cycle for text-based formats only.
+        
+        DEPRECATED: This test is kept for backward compatibility but the 
+        comprehensive test above covers all formats more efficiently.
+        """
         # Write data to file
         FileIOInterface.fwrite(write_path=file_path_by_extension, data=sample_data_by_extension)
         
@@ -49,7 +85,6 @@ class TestFileIOIntegrationRoundtrip:
         # Verify data roundtrip is correct
         # For text files, normalize line endings for cross-platform compatibility
         if file_extension == "txt":
-            # Normalize line endings (Windows converts \n to \r\n)
             expected_data = sample_data_by_extension.replace('\n', '\r\n') if '\r\n' not in sample_data_by_extension else sample_data_by_extension
             assert read_data == expected_data
         else:
@@ -144,8 +179,8 @@ class TestFileIOIntegrationOperations:
         FileIOInterface.fwrite(write_path=file_path, data=sample_text_data)
         assert os.path.exists(file_path)
         
-        # Delete file
-        FileIOInterface.fdelete(fpath=file_path)
+        # Delete file (use correct parameter name)
+        FileIOInterface.fdelete(path=file_path)
         
         # Verify file was deleted
         assert not os.path.exists(file_path)
@@ -202,13 +237,24 @@ class TestFileIOIntegrationDataTypes:
         """Test roundtrip with complex data structures."""
         data, extension = data_and_extension
         file_path = os.path.join(temp_dir, f"complex_test.{extension}")
-        
+
         # Write and read back
-        FileIOInterface.fwrite(write_path=file_path, data=data)
-        read_data = FileIOInterface.fread(read_path=file_path)
-        
+        if extension == "txt":
+            # Only pass encoding for text files
+            FileIOInterface.fwrite(write_path=file_path, data=data, encoding='utf-8')
+            read_data = FileIOInterface.fread(read_path=file_path, encoding='utf-8')
+        else:
+            # For JSON/YAML, don't pass encoding parameters
+            FileIOInterface.fwrite(write_path=file_path, data=data)
+            read_data = FileIOInterface.fread(read_path=file_path)
+
         # Verify data integrity
-        assert read_data == data
+        if extension == "txt":
+            # Handle line ending normalization for text files on Windows
+            expected_data = data.replace('\n', '\r\n') if '\r\n' not in data else data
+            assert read_data == expected_data
+        else:
+            assert read_data == data
 
     def test_dataframe_with_various_dtypes_roundtrip(self, temp_dir):
         """Test DataFrame with various data types survives CSV roundtrip."""
@@ -224,8 +270,8 @@ class TestFileIOIntegrationDataTypes:
         
         csv_path = os.path.join(temp_dir, "complex_dataframe.csv")
         
-        # Write and read back
-        FileIOInterface.fwrite(write_path=csv_path, data=complex_df)
+        # Write and read back (explicitly set index=False for CSV)
+        FileIOInterface.fwrite(write_path=csv_path, data=complex_df, index=False)
         read_df = FileIOInterface.fread(read_path=csv_path)
         
         # Note: Some data types may change during CSV roundtrip
@@ -531,12 +577,13 @@ class TestFileIOIntegrationEdgeCases:
         # Text with various Unicode characters
         unicode_text = "Hello 世界! 🌍 Привет мир! 🚀 Testing émojis and açcénts"
         
-        # Write and read Unicode text
-        FileIOInterface.fwrite(write_path=unicode_txt_path, data=unicode_text)
-        read_text = FileIOInterface.fread(read_path=unicode_txt_path)
+        # Write and read Unicode text with explicit UTF-8 encoding
+        FileIOInterface.fwrite(write_path=unicode_txt_path, data=unicode_text, encoding='utf-8')
+        read_text = FileIOInterface.fread(read_path=unicode_txt_path, encoding='utf-8')
         
-        # Verify Unicode roundtrip
-        assert read_text == unicode_text
+        # Verify Unicode roundtrip (handle potential line ending differences)
+        expected_text = unicode_text.replace('\n', '\r\n') if '\r\n' not in unicode_text else unicode_text
+        assert read_text == expected_text
 
     def test_special_characters_in_filenames(self, temp_dir):
         """Test handling of special characters in file names."""
@@ -556,3 +603,123 @@ class TestFileIOIntegrationEdgeCases:
         
         copied_data = FileIOInterface.fread(read_path=copy_path)
         assert copied_data == test_data
+
+
+class TestFileIOIntegrationDataTypeValidation:
+    """Test that file extensions only accept appropriate data types."""
+    
+    def test_data_type_validation_for_file_extensions(self, temp_dir, sample_dataframe, 
+                                                    sample_text_data, sample_json_data):
+        """Test that each file format enforces correct data types.
+        
+        This validates the data type enforcement described in _base.py:
+        - DataFrame formats: csv, parquet, arrow, feather (require DataFrame)
+        - Text formats: txt, text, log, logs, sql (require string)  
+        - Serializable formats: json, yaml, yml, pickle, pkl (flexible)
+        """
+        # Test DataFrame formats require DataFrame
+        dataframe_extensions = ['csv', 'parquet', 'arrow', 'feather']
+        for ext in dataframe_extensions:
+            file_path = str(Path(temp_dir) / f"test.{ext}")
+            
+            # Should work with DataFrame
+            FileIOInterface.fwrite(write_path=file_path, data=sample_dataframe)
+            assert os.path.exists(file_path)
+            
+            # Should fail with string data
+            with pytest.raises(TypeError, match=f"Writing {ext.upper()} files requires a pandas DataFrame"):
+                FileIOInterface.fwrite(write_path=file_path, data=sample_text_data)
+        
+        # Test text formats require string
+        text_extensions = ['txt', 'text', 'log', 'logs', 'sql']
+        for ext in text_extensions:
+            file_path = str(Path(temp_dir) / f"test.{ext}")
+            
+            # Should work with string
+            FileIOInterface.fwrite(write_path=file_path, data=sample_text_data)
+            assert os.path.exists(file_path)
+            
+            # Should fail with DataFrame
+            with pytest.raises(TypeError, match=f"Writing {ext.upper()} files requires a string"):
+                FileIOInterface.fwrite(write_path=file_path, data=sample_dataframe)
+        
+        # Test serializable formats are flexible (should accept various types)
+        serializable_extensions = ['json', 'yaml', 'yml', 'pickle', 'pkl']
+        for ext in serializable_extensions:
+            file_path = str(Path(temp_dir) / f"test.{ext}")
+            
+            # Should work with dict data
+            FileIOInterface.fwrite(write_path=file_path, data=sample_json_data)
+            assert os.path.exists(file_path)
+            
+            # Note: JSON/YAML may have restrictions on certain data types
+            # but pickle should accept almost anything
+
+
+class TestFileIOIntegrationComprehensiveRoundtrip:
+    """Comprehensive roundtrip tests for all supported file formats."""
+    
+    def test_all_extensions_roundtrip_with_appropriate_data(self, file_extension, temp_dir):
+        """Test roundtrip for every supported extension with format-appropriate data.
+        
+        This test creates specific test data for each format and verifies complete
+        write-read cycles work correctly.
+        """
+        import pickle
+        
+        file_path = str(Path(temp_dir) / f"comprehensive_test.{file_extension}")
+        
+        # Create format-specific test data
+        if file_extension in {'txt', 'text', 'log', 'logs', 'sql'}:
+            test_data = f"Test content for {file_extension} format\nLine 2\nLine 3"
+            expected_data = test_data.replace('\n', '\r\n') if '\r\n' not in test_data else test_data
+        elif file_extension in {'csv', 'parquet', 'arrow', 'feather'}:
+            test_data = pd.DataFrame({
+                'id': [1, 2, 3],
+                'name': ['Test1', 'Test2', 'Test3'],
+                'value': [10.5, 20.3, 30.7]
+            })
+            expected_data = test_data
+        elif file_extension in {'json'}:
+            test_data = {
+                'test_key': 'test_value',
+                'numbers': [1, 2, 3],
+                'nested': {'inner_key': 'inner_value'}
+            }
+            expected_data = test_data
+        elif file_extension in {'yaml', 'yml'}:
+            test_data = {
+                'config': {
+                    'database': 'test_db',
+                    'timeout': 30
+                },
+                'features': ['feature1', 'feature2']
+            }
+            expected_data = test_data
+        elif file_extension in {'pickle', 'pkl'}:
+            test_data = {
+                'complex_data': [1, 2, {'nested': True}],
+                'tuple_data': (1, 2, 3)
+            }
+            expected_data = test_data
+        else:
+            pytest.fail(f"Unsupported extension in test: {file_extension}")
+        
+        # Write data
+        if file_extension == 'csv':
+            # For CSV, write without index to ensure clean comparison
+            FileIOInterface.fwrite(write_path=file_path, data=test_data, index=False)
+        else:
+            FileIOInterface.fwrite(write_path=file_path, data=test_data)
+        assert os.path.exists(file_path)
+        
+        # Read data back
+        read_data = FileIOInterface.fread(read_path=file_path)
+        
+        # Verify data integrity
+        if file_extension in {'csv', 'parquet', 'arrow', 'feather'}:
+            pd.testing.assert_frame_equal(read_data, expected_data)
+        elif file_extension in {'txt', 'text', 'log', 'logs', 'sql'}:
+            assert read_data == expected_data
+        else:
+            assert read_data == expected_data

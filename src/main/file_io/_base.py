@@ -207,7 +207,7 @@ class BaseFileIO:
         
         # Define required types for each format
         dataframe_formats = {'csv', 'feather', 'parquet', 'arrow'}
-        str_formats = {'txt', 'text', 'sql', 'log'}
+        str_formats = {'txt', 'text', 'sql', 'log', 'logs'}
         serializable_formats = {'json', 'yaml', 'yml', 'pickle', 'pkl'}
 
         # JSON and YAML can accept various serializable types, so we don't restrict them
