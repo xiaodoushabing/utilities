@@ -162,12 +162,43 @@ def mock_base_fileio(mock_upath):
         yield mock_instance
 
 
-@pytest.fixture  
-def mock_fileio_interface(mock_base_fileio):
-    """Creates a mock for FileIOInterface._instantiate method."""
-    with patch.object(FileIOInterface, '_instantiate') as mock_instantiate:
-        mock_instantiate.return_value = mock_base_fileio
-        yield mock_base_fileio
+@pytest.fixture
+def mock_instantiate():
+    """
+    Provides a mock for FileIOInterface._instantiate method.
+    
+    This fixture automatically mocks the _instantiate method and returns a configured
+    mock FileIO object that can be used across tests. This eliminates the need to 
+    manually patch _instantiate in every test method.
+    
+    Returns:
+        dict: Contains 'mock' (the patch object) and 'fileio' (mock FileIO instance)
+        
+    Usage:
+        def test_something(mock_instantiate):
+            mock_instantiate['fileio']._fread.return_value = "test data"
+            result = FileIOInterface.fread("/test/file.txt")
+            mock_instantiate['mock'].assert_called_once_with("/test/file.txt", None)
+    """
+    with patch.object(FileIOInterface, '_instantiate') as mock_instantiate_patch:
+        # Create a mock FileIO object with common methods
+        mock_fileio = MagicMock()
+        
+        # Set up default return values for common methods
+        mock_fileio._fexists.return_value = True
+        mock_fileio._finfo.return_value = {"size": 1024, "type": "file"}
+        mock_fileio._fread.return_value = "default test data"
+        mock_fileio._fwrite.return_value = None
+        mock_fileio._fcopy.return_value = None
+        mock_fileio._fdelete.return_value = None
+        
+        # Configure the instantiate mock to return our FileIO mock
+        mock_instantiate_patch.return_value = mock_fileio
+        
+        yield {
+            'mock': mock_instantiate_patch,
+            'fileio': mock_fileio
+        }
 
 
 @pytest.fixture
