@@ -41,7 +41,7 @@ class FileIOInterface:
         Returns:
             bool: True if the file exists, False otherwise.
         """
-        fileio: BaseFileIO = __class__._instantiate(fpath, filesystem, *args, **kwargs)
+        fileio: BaseFileIO = __class__._instantiate(fpath=fpath, filesystem=filesystem, *args, **kwargs)
         return fileio._fexists(*args, **kwargs)
 
     @staticmethod
