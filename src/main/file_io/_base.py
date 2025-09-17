@@ -18,6 +18,7 @@ fileio_mapping = {
     "txt": TextFileIO,
     "text": TextFileIO,
     "log": TextFileIO,
+    "logs": TextFileIO,
     "sql": SQLFileIO,
     "json": JsonFileIO,
     "yaml": YamlFileIO,
