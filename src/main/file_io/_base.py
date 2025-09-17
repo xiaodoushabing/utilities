@@ -101,7 +101,7 @@ class BaseFileIO:
             if size is not None:
                 raw_data = f.read(size)
             else:
-                raw_data = f.read(*args, **kwargs)
+                raw_data = f.read()  # Don't pass args/kwargs to read()
         
         # Return raw bytes if requested
         if raw_bytes:
@@ -110,7 +110,8 @@ class BaseFileIO:
         # Otherwise, parse according to file format
         data: BytesIO = BytesIO(raw_data)
         file_io_cls = fileio_mapping[self.file_extension]
-        return file_io_cls._read(data)
+        # Pass args/kwargs to the format-specific _read method
+        return file_io_cls._read(data, *args, **kwargs)
     
     def _fopen(self, mode: str = 'r', *args, **kwargs):
         """
