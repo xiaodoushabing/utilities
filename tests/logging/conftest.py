@@ -331,8 +331,8 @@ def promtail_config():
         "target_paths": ["/var/log/*.log", "/app/logs/*.txt"],
         "log_level": "INFO",
         "static_labels": {
-            "environment": "test",
-            "service": "test-service"
+            "run_id": "test-run",
+            "script_id": "test-script"
         }
     }
 

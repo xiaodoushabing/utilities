@@ -6,11 +6,19 @@ duplication across test files. All fixtures defined here are automatically
 available to all test files in this directory.
 """
 
+from unittest.mock import MagicMock
+import sys
+
+# Patch hydra.logging.promtail.PromtailAgent before any imports
+sys.modules['hydra'] = MagicMock()
+sys.modules['hydra.logging'] = MagicMock()
+sys.modules['hydra.logging.promtail'] = MagicMock()
+sys.modules['hydra.logging.promtail'].PromtailAgent = MagicMock()
+
 import pytest
 import tempfile
 import shutil
 import json
-import yaml
 import pandas as pd
 from pathlib import Path
 from unittest.mock import patch, MagicMock

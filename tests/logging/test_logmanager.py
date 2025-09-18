@@ -326,8 +326,4 @@ class TestIntegration:
         # CopyManager should get copy-specific config
         copy_config = log_manager.config.get("copy_manager", {})
         assert log_manager._copy_manager.config == copy_config
-
-
-# Import required for mock_open
-import yaml
-from unittest.mock import mock_open
+        

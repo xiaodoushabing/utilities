@@ -36,8 +36,8 @@ class TestPromtailManagerInitialization:
         assert manager.target_paths == ["/var/log/*.log", "/app/logs/*.txt"]
         assert manager.log_level == "INFO"
         assert manager.static_labels == {
-            "environment": "test",
-            "service": "test-service"
+            "run_id": "test-run",
+            "script_id": "test-script"
         }
 
     @pytest.mark.parametrize("config,expected", [
@@ -93,8 +93,8 @@ class TestPromtailManagerStartPromtail:
         
         # Verify static labels were set
         expected_labels = {
-            "environment": "test",
-            "service": "test-service"
+            "run_id": "test-run",
+            "script_id": "test-script"
         }
         pipeline_stage = mock_promtail_agent['config'].scrape_configs[0]["pipeline_stages"][0]
         for key, value in expected_labels.items():
