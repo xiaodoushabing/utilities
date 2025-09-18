@@ -6,7 +6,7 @@
 # from .yugabyte_engine import YugabyteEngine
 # SparkEngine will only be imported if necessary
 
-from ..auth.credentials import CredentialsSafeBox
+from ..auth.credentials import CredentialsSafeBox, get_credentials
 from ..aux import retry_args, iter_update_dict
 
 import pandas as pd
@@ -114,7 +114,7 @@ class DatabaseEngine:
         
         # grab credentials
         self._config_credentials = self.conf["db_credentials"]
-        self.credentials_safe_box = CredentialsSafeBox(config=self._config_credentials[self.ENV]["credentials"])
+        self.credentials_safe_box = CredentialsSafeBox(config=self._config_credentials[self.ENV])
         self.credentials = self.credentials_safe_box._credentials
 
         # Handle user-provided credentials (password or credential_path)
@@ -136,7 +136,6 @@ class DatabaseEngine:
         
         # If credential_path is provided, extract password using CredentialsSafeBox
         if self.credential_path:
-            from ..auth.credentials import get_credentials
             password_to_use = get_credentials(self.credential_path)
             
         # Apply to engines with missing credentials
@@ -151,29 +150,31 @@ class DatabaseEngine:
     def _handle_yugabyte_credentials(self):
         """Handle special case for yugabyte credentials.
         
-        If yugabyte has user in config but no credentials are defined in config,
-        use the user-provided password or credential_path arguments.
+        If yugabyte is commented out in config, skip entirely.
+        If yugabyte has user in config but no password/credential_path, use user input.
+        Otherwise, let _handle_user_credentials handle it.
         """
-        # Check if yugabyte exists in endpoint config and has user but missing credentials
-        yugabyte_config = self._config_endpoint.get("yugabyte", {})
-        if yugabyte_config and "user" in yugabyte_config:
-            # Check if yugabyte credentials are missing or empty in config
-            yugabyte_creds = self.credentials.get("yugabyte", {})
-            if not yugabyte_creds or not yugabyte_creds.get("password"):
-                # If user credentials were provided, use them for yugabyte
-                if self.user and (self.password or self.credential_path):
-                    password_to_use = self.password
-                    
-                    # If credential_path is provided, extract password using CredentialsSafeBox
-                    if self.credential_path:
-                        from ..auth.credentials import get_credentials
-                        password_to_use = get_credentials(self.credential_path)
-                    
-                    print(f"Using provided user and {'credential_path' if self.credential_path else 'password'} for yugabyte engine.")
-                    self.credentials["yugabyte"] = {
-                        "user": self.user,
-                        "password": password_to_use
-                    }
+        # If yugabyte is commented out in credentials config, skip entirely
+        if "yugabyte" not in self.credentials:
+            return
+            
+        yugabyte_creds = self.credentials.get("yugabyte", {})
+        
+        # Check if yugabyte has user in config but no password/credential_path
+        if yugabyte_creds.get("user") and not yugabyte_creds.get("password"):
+            # If user provided credentials, use them for yugabyte
+            if self.user and (self.password or self.credential_path):
+                password_to_use = self.password
+                
+                # If credential_path is provided, extract password using CredentialsSafeBox
+                if self.credential_path:
+                    password_to_use = get_credentials(self.credential_path)
+                
+                print(f"Using provided user and {'credential_path' if self.credential_path else 'password'} for yugabyte engine.")
+                self.credentials["yugabyte"] = {
+                    "user": self.user,
+                    "password": password_to_use
+                }
         
     def _instantiate_engines(self):
         """Instantiate database engines based on the db_engine_mapping.
