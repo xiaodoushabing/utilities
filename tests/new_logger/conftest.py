@@ -346,5 +346,3 @@ def minimal_promtail_config():
         "instance_name": "minimal-test",
         "target_paths": ["/test/*.log"]
     }
-
-# ...existing code...
