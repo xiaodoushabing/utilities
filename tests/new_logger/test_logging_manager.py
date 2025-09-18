@@ -6,11 +6,9 @@ which handles Loguru configuration and logger management.
 """
 
 import pytest
-import os
-import sys
 import yaml
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, mock_open
 
 from src.main.logging import LoggingManager
 

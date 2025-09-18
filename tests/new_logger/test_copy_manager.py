@@ -6,10 +6,7 @@ which handles background file copying operations and thread management.
 """
 
 import pytest
-import threading
-import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 from src.main.logging import CopyManager
 
