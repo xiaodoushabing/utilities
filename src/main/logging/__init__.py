@@ -15,13 +15,15 @@ from typing import Optional, List, Union
 from ._logging_manager import LoggingManager
 from ._copy_manager import CopyManager
 from ._distributed_coordinator import DistributedCoordinator
+from ._promtail_manager import PromtailManager
 
 # Make component managers available at package level for easier imports
 __all__ = [
     "LogManager",
     "LoggingManager", 
     "CopyManager",
-    "DistributedCoordinator"
+    "DistributedCoordinator",
+    "PromtailManager"
 ]
 
 class LogManager:
@@ -35,9 +37,9 @@ class LogManager:
     - LoggingManager: Handles Loguru configuration and logger management
     - CopyManager: Handles background file copying operations
     - DistributedCoordinator: Handles distributed system coordination
-    
-    This design provides better maintainability, testability, and separation of concerns
-    while maintaining full backward compatibility with existing code.
+    - PromtailManager: Handles log collection and forwarding to Loki
+
+    This design provides better maintainability, testability, and separation of concerns.
     """
 
     def __init__(
@@ -64,6 +66,9 @@ class LogManager:
             retry=self.config.get("retry",{}),
             enabled=self._coordinator.copy_enabled
         )
+
+        # Initialise promtail manager
+        self._promtail_manager = PromtailManager(config=self.config.get("promtail_manager", {}))
 
         # Register cleanup on exit
         atexit.register(self._cleanup)
@@ -351,6 +356,18 @@ class LogManager:
 
 
     # ========================================================================================
+    # PROMTAIL AGENT - Delegate to PromtailManager
+    # ========================================================================================
+    
+    def start_promtail(self, config: Optional[dict] = None) -> None:
+        """ Starts the Promtail agent using the associated PromtailManager."""
+        return self._promtail_manager.start_promtail(config)
+
+    def stop_promtail(self) -> None:
+        """ Stops the Promtail agent using the associated PromtailManager."""
+        return self._promtail_manager.stop_promtail()
+
+    # ========================================================================================
     # CLEANUP METHODS
     # ========================================================================================
 
@@ -375,6 +392,9 @@ class LogManager:
         
         kwargs = {"timeout": timeout} if timeout is not None else {}
         self._copy_manager.cleanup(**kwargs)
+
+        # Cleanup PromtailAgent
+        self._promtail_manager.cleanup()
 
         # Cleanup logging
         self._logging_manager.cleanup()
