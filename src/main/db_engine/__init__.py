@@ -162,7 +162,7 @@ class DatabaseEngine:
         
         # Check if yugabyte has user in config but no password/credential_path
         if yugabyte_creds.get("user") and not yugabyte_creds.get("password"):
-            # If user provided credentials, use them for yugabyte
+            # If user provided credentials, use password or credential_path for yugabyte
             if self.user and (self.password or self.credential_path):
                 password_to_use = self.password
                 
@@ -170,11 +170,8 @@ class DatabaseEngine:
                 if self.credential_path:
                     password_to_use = get_credentials(self.credential_path)
                 
-                print(f"Using provided user and {'credential_path' if self.credential_path else 'password'} for yugabyte engine.")
-                self.credentials["yugabyte"] = {
-                    "user": self.user,
-                    "password": password_to_use
-                }
+                print(f"Using user from config and user-provided {'credential_path' if self.credential_path else 'password'} for yugabyte engine.")
+                self.credentials["yugabyte"]["password"] = password_to_use
         
     def _instantiate_engines(self):
         """Instantiate database engines based on the db_engine_mapping.
