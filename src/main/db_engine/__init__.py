@@ -42,6 +42,7 @@ class DatabaseEngine:
         conf (dict): Configuration dictionary loaded from the YAML file.
         user (str, optional): Username for database authentication.
         password (str, optional): Password for database authentication.
+        credential_path (str, optional): Path to credential file for password extraction.
         env (str, optional): Working environment (e.g., 'dev', 'prod').
         _config_credentials (dict): Database credentials configuration.
         _config_endpoint (dict): Database endpoint configuration.
@@ -54,6 +55,7 @@ class DatabaseEngine:
         config: str = "",
         user: Optional[str] = None,
         password: Optional[str] = None,
+        credential_path: Optional[str] = None,
         env: Optional[str] = None,
         *args,
         **kwargs
@@ -67,16 +69,25 @@ class DatabaseEngine:
             config (str): Path to the YAML configuration file.
             user (str, optional): Username for database authentication. Defaults to None.
             password (str, optional): Password for database authentication. Defaults to None.
+            credential_path (str, optional): Path to credential file for password extraction. Defaults to None.
             env (str, optional): Working environment (e.g., 'dev', 'prod'). If None, attempts to auto-detect. Defaults to None.
+            
+        Raises:
+            ValueError: If both password and credential_path are provided, or if config file is not provided.
         """
         if not config:
             raise ValueError("config file must be provided.")
+            
+        # Validate that only one of password or credential_path is provided
+        if password is not None and credential_path is not None:
+            raise ValueError("Only one of 'password' or 'credential_path' should be provided, not both.")
         
         with open(config, "r") as f:
             self.conf = yaml.safe_load(f)
             
         self.user = user
         self.password = password
+        self.credential_path = credential_path
         self.ENV = env
         
         if not self.ENV:
@@ -106,17 +117,63 @@ class DatabaseEngine:
         self.credentials_safe_box = CredentialsSafeBox(config=self._config_credentials[self.ENV]["credentials"])
         self.credentials = self.credentials_safe_box._credentials
 
-        # if user and password are provided,
-        # use them for engines defined in config that have missing user/password
-        if self.user and self.password:
-            for engine, credentials in self.credentials.items():
-                if not credentials:
-                    print(f"Using provided user and password for '{engine}' engine.")
-                    self.credentials[engine]["password"] = self.password
-                    self.credentials[engine]["user"] = self.user
+        # Handle user-provided credentials (password or credential_path)
+        if self.user and (self.password or self.credential_path):
+            self._handle_user_credentials()
+        
+        # Handle special case for yugabyte
+        self._handle_yugabyte_credentials()
 
         self.engines = SimpleNamespace()
         self._instantiate_engines()
+        
+    def _handle_user_credentials(self):
+        """Handle user-provided credentials (password or credential_path).
+        
+        Uses provided credentials for engines defined in config that have missing credentials.
+        """
+        password_to_use = self.password
+        
+        # If credential_path is provided, extract password using CredentialsSafeBox
+        if self.credential_path:
+            from ..auth.credentials import get_credentials
+            password_to_use = get_credentials(self.credential_path)
+            
+        # Apply to engines with missing credentials
+        for engine, credentials in self.credentials.items():
+            if not credentials and engine != "spark":
+                print(f"Using provided user and {'credential_path' if self.credential_path else 'password'} for '{engine}' engine.")
+                self.credentials[engine] = {
+                    "user": self.user,
+                    "password": password_to_use
+                }
+    
+    def _handle_yugabyte_credentials(self):
+        """Handle special case for yugabyte credentials.
+        
+        If yugabyte has user in config but no credentials are defined in config,
+        use the user-provided password or credential_path arguments.
+        """
+        # Check if yugabyte exists in endpoint config and has user but missing credentials
+        yugabyte_config = self._config_endpoint.get("yugabyte", {})
+        if yugabyte_config and "user" in yugabyte_config:
+            # Check if yugabyte credentials are missing or empty in config
+            yugabyte_creds = self.credentials.get("yugabyte", {})
+            if not yugabyte_creds or not yugabyte_creds.get("password"):
+                # If user credentials were provided, use them for yugabyte
+                if self.user and (self.password or self.credential_path):
+                    password_to_use = self.password
+                    
+                    # If credential_path is provided, extract password using CredentialsSafeBox
+                    if self.credential_path:
+                        from ..auth.credentials import get_credentials
+                        password_to_use = get_credentials(self.credential_path)
+                    
+                    print(f"Using provided user and {'credential_path' if self.credential_path else 'password'} for yugabyte engine.")
+                    self.credentials["yugabyte"] = {
+                        "user": self.user,
+                        "password": password_to_use
+                    }
         
     def _instantiate_engines(self):
         """Instantiate database engines based on the db_engine_mapping.
@@ -151,12 +208,15 @@ class DatabaseEngine:
                 db_engine_mapping[db_engine] = SparkEngine
             except ImportError as e:
                 raise ImportError(f"{e}")
-            # If SparkEngine is imported successfully, it is added to the mapping
+            # For Spark, pass all credentials since it needs sub-engine credentials
+            return SparkEngine(
+                engine_config=self._config_endpoint.get(db_engine, {}),
+                all_credentials=self.credentials,  # Pass all credentials for sub-engines
+            )
+        # If SparkEngine is imported successfully, it is added to the mapping
         return db_engine_mapping[db_engine](
             engine_config=self._config_endpoint.get(db_engine, {}),
-            credentials=self.credentials[db_engine],
-            user=self.user,         # overwrites 'user' in credentials
-            password=self.password  # overwrites 'password' in credentials
+            credentials=self.credentials[db_engine]
         )
 
     def list_engines(self) -> list[str]:

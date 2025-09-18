@@ -26,13 +26,13 @@ class SparkEngine:
 			- 'presets': Preset configurations for different scenarios.
 			- 'cache': Cache-related configuration.
 			- 'edw': EDW-specific configuration.
-		credentials (dict, optional): Dictionary containing user credentials for EDW with keys 'user' and 'password'. Defaults to an empty dictionary.
-		user (str, optional): Username for EDW authentication. If not provided, will be fetched from credentials. Defaults to None.
-		password (str, optional): Password for EDW authentication. If not provided, will be fetched from credentials. Defaults to None.
+		all_credentials (dict, optional): Dictionary containing all engine credentials (edw, hive, etc.). Defaults to None.
+		user (str, optional): Username for authentication. If not provided, will be fetched from credentials. Defaults to None.
+		password (str, optional): Password for authentication. If not provided, will be fetched from credentials. Defaults to None.
 	Raises:
-		AssertionError: If neither `user` nor `password` is provided or they are invalid.
+		ValueError: If all_credentials is not provided or doesn't contain required sub-engine credentials.
 	Attributes:
-		_credential (dict): Stores the user and URL-encoded password for authentication.
+		_all_credentials (dict): Stores credentials for all sub-engines.
 		_engine_config (dict): Stores the default engine configuration.
 		_engine_presets (dict): Stores preset configurations for the engine.
 		_cache_config (dict): Stores cache-related configurations.
@@ -42,23 +42,65 @@ class SparkEngine:
 	def __init__(
 		self,
 		engine_config: dict,
-		credentials: dict = {},
+		all_credentials: dict = None,
 		user: str = None,
 		password: str = None
 	):
-		user = user or credentials.get("user", "")
-		password = password or credentials.get("password", "")
-		assert user and password, '"user" or "password" is invalid!'
+		# Store all credentials for sub-engines
+		if all_credentials is None:
+			raise ValueError("all_credentials must be provided for SparkEngine to access sub-engine credentials")
 		
-		self._credential = dict(
-			user=user,
-			password=quote_plus(password),
-		)
+		edw_creds = all_credentials.get("edw")
+		if not edw_creds or not edw_creds.get("user") or not edw_creds.get("password"):
+			raise ValueError("Credentials for 'edw' must include non-empty 'user' and 'password' for SparkEngine")
+		
+		
+		self._all_credentials = all_credentials
+		self._user_override = user
+		self._password_override = password
+		
 		self._engine_config = dict(**engine_config['default'])
 		self._engine_presets = dict(**engine_config['presets'])
 		self._cache_config = dict(**engine_config['cache'])
 		self._edw_config = dict(**engine_config['edw'])
 		self.spark_session = None
+		print("SparkEngine activated: Spark support is enabled.")	
+
+	def _get_sub_engine_credentials(self, sub_engine: str) -> dict:
+		"""
+		Get credentials for a specific sub-engine.
+		
+		Args:
+			sub_engine (str): The sub-engine name (e.g., 'edw', 'hive')
+			
+		Returns:
+			dict: Dictionary with 'user' and 'password' keys
+			
+		Raises:
+			ValueError: If credentials for the sub-engine are not found
+		"""
+		sub_engine = sub_engine.lower()
+		
+		if sub_engine not in self._all_credentials:
+			raise ValueError(f"Credentials for sub-engine '{sub_engine}' not found in configuration")
+		
+		credentials = self._all_credentials[sub_engine]
+		
+		# First priority: Use config-specific credentials if they exist and are not empty
+		config_user = credentials.get("user", "")
+		config_password = credentials.get("password", "")
+		
+		# Use config credentials if they exist, otherwise fall back to overrides
+		user = config_user if config_user else self._user_override
+		password = config_password if config_password else self._password_override
+		
+		if not user or not password:
+			raise ValueError(f"Invalid credentials for sub-engine '{sub_engine}': user='{user}', password={'***' if password else 'None'}")
+		
+		return {
+			"user": user,
+			"password": password
+		}
 
 	def query(self, query: str, sub_engine: str, cache_valid: int = None, **kwargs) -> SparkDataFrame:
 		"""
@@ -192,8 +234,11 @@ class SparkEngine:
 		"""
 		self.cache_manager = CacheManager(self.spark_session, self._cache_config)
 		self.hive_data_manager = HiveDataManager(self.spark_session)
+		
+		# Get EDW-specific credentials for EDW data manager
+		edw_credentials = self._get_sub_engine_credentials('edw')
 		self.edw_data_manager = EDWDataManager(
-			spark_edw_credential=self._credential,
+			spark_edw_credential=edw_credentials,
 			spark_edw_config=self._edw_config,
 			spark_session=self.spark_session,
 		)
