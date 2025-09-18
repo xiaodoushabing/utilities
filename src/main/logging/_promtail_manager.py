@@ -8,6 +8,7 @@ class PromtailManager:
         self.target_paths = config.get("target_paths", [])
         self.log_level = config.get("log_level", "").upper()
         self.static_labels = config.get("static_labels", {})
+        self.promtail_agent = None
     
     def start_promtail(self, config: Optional[dict] = None):
         if config:
@@ -51,8 +52,8 @@ class PromtailManager:
 
     def cleanup(self):
         if self.promtail_agent == None:
+            print("No PromtailAgent to clean up.")
             return
-        
         print("PromtailManager cleanup initiated...")
         self.stop_promtail()
         print("PromtailManager cleanup completed.")

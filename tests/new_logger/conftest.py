@@ -9,6 +9,15 @@ component-based architecture:
 - DistributedCoordinator (distributed system coordination)
 """
 
+import sys
+from unittest.mock import MagicMock
+
+# Patch hydra.logging.promtail.PromtailAgent before any imports
+sys.modules['hydra'] = MagicMock()
+sys.modules['hydra.logging'] = MagicMock()
+sys.modules['hydra.logging.promtail'] = MagicMock()
+sys.modules['hydra.logging.promtail'].PromtailAgent = MagicMock()
+
 import pytest
 import tempfile
 import yaml
@@ -133,7 +142,7 @@ def distributed_coordinator():
 
 
 @pytest.fixture
-def log_manager(mock_logger, default_config):
+def log_manager(mock_logger, default_config, mock_promtail_agent):
     """
     Complete LogManager instance for integration testing.
     """
@@ -270,3 +279,73 @@ def mock_signal():
         mock_signal.SIGTERM = 15
         mock_signal.SIGINT = 2
         yield mock_signal
+
+
+# ========================================================================================
+# PROMTAIL FIXTURES
+# ========================================================================================
+
+@pytest.fixture
+def mock_promtail_agent():
+    """
+    Mock PromtailAgent for testing PromtailManager without hydra dependency.
+    """
+    with patch('src.main.logging._promtail_manager.PromtailAgent') as mock_agent_class:
+        mock_agent_instance = MagicMock()
+        
+        # Mock promtail_config structure
+        mock_config = MagicMock()
+        mock_scrape_config = MagicMock()
+        mock_pipeline_stage = {"static_labels": {}}
+        mock_scrape_config.__getitem__.return_value = [mock_pipeline_stage]
+        mock_config.scrape_configs = [mock_scrape_config]
+        mock_agent_instance.promtail_config = mock_config
+        
+        # Mock methods
+        mock_agent_instance.start.return_value = None
+        mock_agent_instance.stop.return_value = None
+        
+        mock_agent_class.return_value = mock_agent_instance
+        
+        yield {
+            'class': mock_agent_class,
+            'instance': mock_agent_instance,
+            'config': mock_config
+        }
+
+
+@pytest.fixture
+def promtail_manager():
+    """
+    PromtailManager instance for testing.
+    """
+    return PromtailManager()
+
+
+@pytest.fixture
+def promtail_config():
+    """
+    Sample PromtailManager configuration for testing.
+    """
+    return {
+        "instance_name": "test-instance",
+        "target_paths": ["/var/log/*.log", "/app/logs/*.txt"],
+        "log_level": "INFO",
+        "static_labels": {
+            "environment": "test",
+            "service": "test-service"
+        }
+    }
+
+
+@pytest.fixture
+def minimal_promtail_config():
+    """
+    Minimal required PromtailManager configuration.
+    """
+    return {
+        "instance_name": "minimal-test",
+        "target_paths": ["/test/*.log"]
+    }
+
+# ...existing code...
