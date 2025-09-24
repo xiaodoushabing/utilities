@@ -270,6 +270,8 @@ class LoggingManager:
         # Handle email sink - create EmailHandler instance
         elif handler_conf.get("sink") == "email":
             handler_conf["sink"] = self._create_email_handler(handler_name, handler_conf.get("email_config", {}))
+            # Remove email_config from handler_conf since it's not a valid logger.add() parameter
+            handler_conf.pop("email_config", None)
         
         # ensure level is in uppercase
         handler_conf["level"] = handler_conf["level"].upper()
@@ -352,18 +354,20 @@ class LoggingManager:
     def email_logs(
             self,
             file_paths: List[str],
-            to_emails: List[str],
+            to_emails: List[str] = None,
             message:str = None,
             subject: str = None,
             html: bool = None,
             handler_name: str = None,
     ):
         """
+        To use email_logs, email handler **must** be configured first.
+        The `from`, `host`, and `port` fields in the email handler config are used to send emails.
         Send one or more log files as email attachments using a configured email handler.
 
         Args:
             file_paths (List[str]): List of paths to log files to send
-            to_emails (List[str]): List of email addresses
+            to_emails (List[str]): List of email addresses. If not provided, uses default from handler config.
             message (str): Optional email message body. If not provided, uses default.
             subject (str): Optional email subject. If not provided, uses default.
             html (bool): Optional flag indicating whether the email should be sent as HTML. Defaults to None.
@@ -385,26 +389,37 @@ class LoggingManager:
 
         if not config:
             raise AssertionError("No email handler config found.")
+        
+        # Use provided to_emails or default from config
+        if to_emails is None or not to_emails:
+            to_emails = config.get("to", [])
+        if not to_emails:
+            raise AssertionError("No recipient email addresses provided. Please specify 'to_emails' or configure default recipients in the email handler config.")
 
-        # Compose subject and message
+        # Use provided subject or default subject from config
         if subject:
             email_subject = subject
-        elif len(file_paths) == 1:
-            email_subject = f"[LOG] {Path(file_paths[0]).name}"
-        else:
-            email_subject = f"[LOG] {len(file_paths)} files attached"
+        elif subject is None and "subject" in config:
+            email_subject = config["subject"]
+        elif subject is None and "subject" not in config:
+            if len(file_paths) == 1:
+                email_subject = f"[LOG] {Path(file_paths[0]).name}"
+            else:
+                email_subject = f"[LOG] {len(file_paths)} files attached"
 
+        # Use provided message or default message
         if message is None:
             if len(file_paths) == 1:
                 message = f"Please find attached the log file: {Path(file_paths[0]).name}"
             else:
                 message = f"Please find attached {len(file_paths)} log files."
 
+        # Add html flag to config if provided
         if html is not None:
             config['html'] = html
 
         return send_email(
-            config=config,
+            email_config=config,
             message=message,
             subject=email_subject,
             to=to_emails,

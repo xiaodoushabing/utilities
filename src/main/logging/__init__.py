@@ -196,7 +196,7 @@ class LogManager:
         """
         return self._logging_manager.remove_handler(handler_name)
     
-    def email_logs(self, attachments: List[str], to_emails: List[str], message:str = None, subject: str = None, html: bool = None, handler_name: str = None,):
+    def email_logs(self, attachments: List[str], to_emails: List[str] = None, message:str = None, subject: str = None, html: bool = None, handler_name: str = None,):
         """
         Send an email with the specified files as attachments using the specified email handler.
 

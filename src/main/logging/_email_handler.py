@@ -27,13 +27,13 @@ def send_email(email_config: Dict[str, Any],
 
     try:
         # Validate required fields
-        required_fields = ['from', 'to', 'host', 'port']
+        required_fields = ['from', 'host', 'port']
         for field in required_fields:
             if field not in email_config:
                 raise ValueError(f"Required field '{field}' missing from email config")
         
         # Determine values with following precedence: argument > email_config > default
-        to_emails = to if to is not None else email_config.get('to')
+        to_emails = to if to is not None else email_config.get('to', [])
         email_subject = subject if subject is not None else email_config.get('subject', '[LOG] Message')
         email_html = html if html is not None else email_config.get('html', False)
 
@@ -53,7 +53,11 @@ def send_email(email_config: Dict[str, Any],
         
         # Send the email
         res = SMTP().notify(**email_config)
-        return res
+        if not hasattr(res, 'status') or res.status != 'Success':
+            print(f"Email sending failed: {res}")
+            return False
+        print("Email sent successfully")
+        return True
         
     except Exception as e:
         print(f"Failed to send email: {e}")

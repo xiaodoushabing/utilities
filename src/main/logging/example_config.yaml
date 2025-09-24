@@ -29,12 +29,12 @@ handlers:
     level: "ERROR"
     email_config:
       from: "sender_email@something.com"
-      to:
+      to: # optional, can be overridden in code
         - "your-email@something.com"
         - "another-email@something.com"
       host: "hello.smtp"
       port: 123
-      subject: "[LOG] Message"
+      subject: "[LOG] Message" # optional, can be overridden in code
 
 # Define logger tasks and their associated handlers with levels
 loggers:
