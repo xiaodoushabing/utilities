@@ -9,8 +9,9 @@ import os
 import sys
 import yaml
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, List
 from collections import defaultdict
+from ._email_handler import create_email_sink_from_config, send_email
 
 from loguru import logger
 
@@ -266,6 +267,10 @@ class LoggingManager:
         elif handler_conf.get("sink") == "sys.stderr":
             handler_conf["sink"] = sys.stderr
         
+        # Handle email sink - create EmailHandler instance
+        elif handler_conf.get("sink") == "email":
+            handler_conf["sink"] = self._create_email_handler(handler_name, handler_conf.get("email_config", {}))
+        
         # ensure level is in uppercase
         handler_conf["level"] = handler_conf["level"].upper()
 
@@ -313,6 +318,98 @@ class LoggingManager:
             return record_level >= effective_threshold
         
         return filter_func
+
+    def _create_email_handler(self, handler_name: str, email_config: dict):
+        """
+        Create an email sink function from handler configuration.
+        
+        Args:
+            handler_name (str): The name of the handler.
+            handler_conf (dict): The handler configuration containing email settings.
+            
+        Returns:
+            callable: Email sink function for Loguru.
+            
+        Raises:
+            AssertionError: If required email configuration is missing.
+        """
+        # Check for email configuration
+        if not email_config:
+            raise AssertionError(f"Handler {handler_name} with sink 'email' must have an 'email_config' section.")
+        
+        try:
+            email_handler = create_email_sink_from_config(email_config)
+            # Store reference to email config for email_logs
+            if not hasattr(self, '_email_configs'):
+                self._email_configs = {}
+            self._email_configs[handler_name] = email_config
+            return email_handler
+        except Exception as e:
+            raise AssertionError(f"Failed to create email handler {handler_name}: {e}")
+
+    ## ------------------------------ EMAIL FUNCTIONALITY ------------------------------ ##
+    
+    def email_logs(
+            self,
+            file_paths: List[str],
+            to_emails: List[str],
+            message:str = None,
+            subject: str = None,
+            html: bool = None,
+            handler_name: str = None,
+    ):
+        """
+        Send one or more log files as email attachments using a configured email handler.
+
+        Args:
+            file_paths (List[str]): List of paths to log files to send
+            to_emails (List[str]): List of email addresses
+            message (str): Optional email message body. If not provided, uses default.
+            subject (str): Optional email subject. If not provided, uses default.
+            html (bool): Optional flag indicating whether the email should be sent as HTML. Defaults to None.
+            handler_name (str): Optional handler name to get config from. If not provided, uses the first available email handler.
+
+        Raises:
+            AssertionError: If no email handlers are configured.
+            AssertionError: If the specified handler name does not exist.
+        """
+        if not hasattr(self, '_email_configs') or not self._email_configs:
+            raise AssertionError("No email handlers configured. Add an email handler first.")
+
+        if handler_name:
+            if handler_name not in self._email_configs:
+                raise AssertionError(f"Email handler '{handler_name}' does not exist. Available handlers: {list(self._email_configs.keys())}")
+            config = self._email_configs.get(handler_name)
+        else:
+            config = next(iter(self._email_configs.values()), None)
+
+        if not config:
+            raise AssertionError("No email handler config found.")
+
+        # Compose subject and message
+        if subject:
+            email_subject = subject
+        elif len(file_paths) == 1:
+            email_subject = f"[LOG] {Path(file_paths[0]).name}"
+        else:
+            email_subject = f"[LOG] {len(file_paths)} files attached"
+
+        if message is None:
+            if len(file_paths) == 1:
+                message = f"Please find attached the log file: {Path(file_paths[0]).name}"
+            else:
+                message = f"Please find attached {len(file_paths)} log files."
+
+        if html is not None:
+            config['html'] = html
+
+        return send_email(
+            config=config,
+            message=message,
+            subject=email_subject,
+            to=to_emails,
+            attachments=file_paths
+        )
 
     ## ------------------------------ LOGGER MANAGEMENT ------------------------------ ##
     def get_logger(self, logger_name: str):
@@ -434,6 +531,11 @@ class LoggingManager:
         Note: This method can be called multiple times safely.
         """
         print("Logger cleanup initiated...")
+        
+        # Clear email configs
+        if hasattr(self, '_email_configs'):
+            self._email_configs.clear()
+        
         logger.remove()
         self._handlers_map.clear()
         self._loggers_map.clear()

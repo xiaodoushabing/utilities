@@ -191,14 +191,31 @@ class LogManager:
         Args:
             handler_name (str): The name of the handler to remove.
             
-        Raises:
-            AssertionError: If the handler with the given name does not exist.
-            
         Note:
             This will also clean up all logger mappings associated with the handler.
         """
         return self._logging_manager.remove_handler(handler_name)
     
+    def email_logs(self, attachments: List[str], to_emails: List[str], message:str = None, subject: str = None, html: bool = None, handler_name: str = None,):
+        """
+        Send an email with the specified files as attachments using the specified email handler.
+
+        Args:
+            attachments (List[str]): List of file paths to attach.
+            to_emails (List[str]): List of recipient email addresses.
+            message (str): Optional email message body. If not provided, a default message is used.
+            subject (str): Optional email subject. If not provided, uses config subject or defaults to "[LOG] {filename}".
+            html (bool): Whether the message is parsed as HTML. If None, uses handler config
+            handler_name (str): Name of the email handler to use. If None, uses the first available email handler.
+        """
+        return self._logging_manager.email_logs(
+            file_paths=attachments,
+            to_emails=to_emails,
+            message=message,
+            subject=subject,
+            html=html,
+            handler_name=handler_name,
+        )
     
     # ========================================================================================
     # DISTRIBUTED COORDINATION METHODS - Delegate to DistributedCoordinator

@@ -1,10 +1,11 @@
 # LogManager Configuration File
-# Simple configuration with 2 handlers and 2 tasks
+# Simple configuration with 3 handlers (file, console, email) and 2 tasks
 
 # Define custom formats
 formats:
   simple: "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[logger_name]} | {file: <16} | {function}:{line} | {message}"
   console: "🧊 <green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{extra[logger_name]}</cyan> | <cyan>{file: <16} | {function}:{line}</cyan> | <level>{message}</level>"
+  email: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[logger_name]} | {file: <16} | {function} : {line} - {message}"
 
 # Define handlers
 handlers:
@@ -22,6 +23,19 @@ handlers:
     format: "console"
     level: "info"
 
+  handler_email:
+    sink: "email"
+    format: "email"
+    level: "ERROR"
+    email_config:
+      from: "sender_email@something.com"
+      to:
+        - "your-email@something.com"
+        - "another-email@something.com"
+      host: "hello.smtp"
+      port: 123
+      subject: "[LOG] Message"
+
 # Define logger tasks and their associated handlers with levels
 loggers:
   logger_a:
@@ -29,6 +43,8 @@ loggers:
       level: "WARNING"
     - handler: "handler_console"
       level: "DEBUG"
+    - handler: "handler_email"
+      level: "ERROR"
 
   logger_b:
     - handler: "handler_console"
