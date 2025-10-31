@@ -60,18 +60,21 @@ def log_retry_attempt(retry_state):
     print(f"  ⚠️  Attempt {attempt}/{max_attempts} failed")
     
     # Check if it was an exception or bad result
-    if retry_state.outcome.failed:
+    # Note: outcome is only available in after_retry callbacks, not before_retry
+    if retry_state.outcome is not None and retry_state.outcome.failed:
         exc = retry_state.outcome.exception()
         print(f"     Error: {type(exc).__name__}: {exc}")
-    else:
+    elif retry_state.outcome is not None:
         result = retry_state.outcome.result()
         print(f"     Bad result: {result}")
+    else:
+        print(f"     About to retry attempt {attempt}")
 
 attempt_count_2 = 0
 
 @retry_args(
     retry_conditions=retry_if_exception_type(ConnectionError),
-    before_retry=log_retry_attempt,
+    after_retry=log_retry_attempt,  # Changed from before_retry to after_retry
     max_attempts=4,
     wait_seconds=1
 )
@@ -144,15 +147,17 @@ print("Example 4: Log Retries Based on Result")
 print("=" * 70)
 
 def log_bad_result(retry_state):
-    result = retry_state.outcome.result()
-    attempt = retry_state.attempt_number
-    print(f"  ⚠️  Attempt {attempt} returned: {result} (retrying...)")
+    # Note: outcome is only available in after_retry callbacks
+    if retry_state.outcome is not None:
+        result = retry_state.outcome.result()
+        attempt = retry_state.attempt_number
+        print(f"  ⚠️  Attempt {attempt} returned: {result} (retrying...)")
 
 attempt_count_4 = 0
 
 @retry_args(
     retry_conditions=retry_if_result(lambda x: x is None or x == []),
-    before_retry=log_bad_result,
+    after_retry=log_bad_result,  # Changed from before_retry to after_retry
     max_attempts=4,
     wait_seconds=1
 )
@@ -281,7 +286,8 @@ print("Example 7: Log Exception Type and Message")
 print("=" * 70)
 
 def log_exception_details(retry_state):
-    if retry_state.outcome.failed:
+    # Note: outcome is only available in after_retry callbacks
+    if retry_state.outcome is not None and retry_state.outcome.failed:
         exc = retry_state.outcome.exception()
         exc_type = type(exc).__name__
         exc_msg = str(exc)
@@ -292,7 +298,7 @@ def log_exception_details(retry_state):
 attempt_count_7 = 0
 
 @retry_args(
-    before_retry=log_exception_details,
+    after_retry=log_exception_details,  # Changed from before_retry to after_retry
     max_attempts=4,
     wait_seconds=1
 )
@@ -331,16 +337,17 @@ def comprehensive_logging(retry_state):
     print(f"     - Idle for: {retry_state.idle_for}s")
     print(f"     - Next action: {retry_state.next_action}")
     
-    if retry_state.outcome.failed:
+    # Note: outcome is only available in after_retry callbacks
+    if retry_state.outcome is not None and retry_state.outcome.failed:
         exc = retry_state.outcome.exception()
         print(f"     - Exception: {type(exc).__name__}")
-    else:
+    elif retry_state.outcome is not None:
         print(f"     - Result: {retry_state.outcome.result()}")
 
 attempt_count_8 = 0
 
 @retry_args(
-    before_retry=comprehensive_logging,
+    after_retry=comprehensive_logging,  # Changed from before_retry to after_retry
     max_attempts=3,
     wait_seconds=2
 )
@@ -417,10 +424,18 @@ retry_state.next_action             - What happens next
 retry_state.args                    - Function arguments
 retry_state.kwargs                  - Function keyword arguments
 
+IMPORTANT: Callback Timing
+- before_retry: Called BEFORE each retry attempt
+  * retry_state.outcome is None (function hasn't run yet)
+  * Use for: logging attempt number, preparing for retry
+- after_retry: Called AFTER each retry attempt  
+  * retry_state.outcome contains the result/exception
+  * Use for: logging exceptions, results, timing
+
 Common Patterns:
 - before_retry: Log before each retry (see attempt number)
-- after_retry: Log after each retry (measure timing)
-- Access exception: retry_state.outcome.exception()
-- Access result: retry_state.outcome.result()
+- after_retry: Log after each retry (access exceptions/results)
+- Access exception: retry_state.outcome.exception() (after_retry only)
+- Access result: retry_state.outcome.result() (after_retry only)
 """)
 print("=" * 70)
