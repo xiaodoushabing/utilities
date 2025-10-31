@@ -1,10 +1,10 @@
 import os
 import warnings
-from typing import Callable, Any
-from  functools import wraps
+from typing import Callable, Any, Union, List
+from functools import wraps
 
 try:
-    from tenacity import Retrying, stop_after_attempt, wait_fixed, retry_any
+    from tenacity import Retrying, stop_after_attempt, wait_fixed, retry_any, before_sleep, after
 except ImportError:
     warnings.warn("tenacity is not installed. Retry functionality will not be available."
                   " Install it with 'pip3 install tenacity' to enable retry logic.")
@@ -26,9 +26,9 @@ def append_to_path_var(path_var: str, path: str) -> None:
         os.environ[path_var] = path if not existing_path else f"{path}:{existing_path.strip(':')}"
 
 def _resolve(
-        instance: Any | None,
-        attr_name: str | None,
-        explicit: Any | None,
+        instance: Union[Any, None],
+        attr_name: Union[str, None],
+        explicit: Union[Any, None],
         default: Any,
 ) -> Any:
     """Return a value using the precedence order: explicit > instance attribute > default.
@@ -57,13 +57,13 @@ def _resolve(
 def retry_args(
         func=None,
         *,
-        max_attempts: int | None = None,
-        wait_seconds: int | None = None,
+        max_attempts: Union[int, None] = None,
+        wait_seconds: Union[int, None] = None,
         max_attempts_attr: str = "retry_max_attempts",
         wait_attr: str = "retry_wait",
-        retry_conditions: list[Callable] | Callable | None = None,
-        before_retry: Callable | None = None,
-        after_retry: Callable | None = None,
+        retry_conditions: Union[List[Callable], Callable, None] = None,
+        before_retry: Union[Callable, None] = None,
+        after_retry: Union[Callable, None] = None,
         attempts_default: int = 2,
         wait_default: int = 1,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -84,7 +84,6 @@ def retry_args(
             If None, retries on all exceptions (default tenacity behavior).
         before_retry: Callback function called before each retry attempt.
             Receives retry_state object with: attempt_number, outcome, args, kwargs, etc.
-            Example: lambda retry_state: print(f"Retry attempt {retry_state.attempt_number}")
         after_retry: Callback function called after each retry attempt.
             Receives retry_state object with: attempt_number, outcome, args, kwargs, etc.
         attempts_default: Default max_attempts if not specified elsewhere.
@@ -92,24 +91,6 @@ def retry_args(
     
     Returns:
         Callable: The decorated function with retry logic.
-    
-    Examples:
-        # Log retry attempts
-        @retry_args(
-            retry_conditions=retry_if_exception_type(ConnectionError),
-            before_retry=lambda s: print(f"Retry {s.attempt_number}/{s.retry_object.stop.max_attempt_number}"),
-            max_attempts=3
-        )
-        def fetch(): pass
-        
-        # Access attempt info in a custom function
-        def log_retry(retry_state):
-            print(f"Attempt {retry_state.attempt_number} failed")
-            if retry_state.outcome.failed:
-                print(f"Error: {retry_state.outcome.exception()}")
-        
-        @retry_args(before_retry=log_retry)
-        def fetch(): pass
     """
     def decorator(inner_func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(inner_func)
@@ -143,13 +124,33 @@ def retry_args(
             )
 
             # Handle retry conditions
-            if retry_conditions:
+            if retry_conditions is not None:
                 if isinstance(retry_conditions, list):
+                    # Validate list items are callables
+                    if not retry_conditions:
+                        raise ValueError("retry_conditions list cannot be empty")
+                    
+                    for i, condition in enumerate(retry_conditions):
+                        if not callable(condition):
+                            raise TypeError(
+                                f"retry_conditions[{i}] is not callable. "
+                                f"Expected a tenacity predicate like retry_if_exception_type(...), "
+                                f"got {type(condition).__name__}"
+                            )
+                    
+                    # Combine conditions
                     if len(retry_conditions) == 1:
                         retry_kwargs["retry"] = retry_conditions[0]
                     else:
                         retry_kwargs["retry"] = retry_any(*retry_conditions)
                 else:
+                    # Single condition - validate it's callable
+                    if not callable(retry_conditions):
+                        raise TypeError(
+                            f"retry_conditions must be a callable tenacity predicate or list of predicates. "
+                            f"Got {type(retry_conditions).__name__}. "
+                            f"Example: retry_if_exception_type(ConnectionError)"
+                        )
                     retry_kwargs["retry"] = retry_conditions
             
             # Add callbacks if provided
