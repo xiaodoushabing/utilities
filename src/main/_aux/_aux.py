@@ -1,16 +1,17 @@
 import os
 import warnings
-from typing import Callable
+from typing import Callable, Any
 from  functools import wraps
 
 try:
-    from tenacity import Retrying, stop_after_attempt, wait_fixed
+    from tenacity import Retrying, stop_after_attempt, wait_fixed, retry_any
 except ImportError:
-    warnings.warn("tenacity is not installed. Retry functionality will not be available." /
+    warnings.warn("tenacity is not installed. Retry functionality will not be available."
                   " Install it with 'pip3 install tenacity' to enable retry logic.")
     Retrying = None
     stop_after_attempt = None
     wait_fixed = None
+    retry_any = None
 
 def append_to_path_var(path_var: str, path: str) -> None:
     """
@@ -24,48 +25,142 @@ def append_to_path_var(path_var: str, path: str) -> None:
     if path not in existing_path:
         os.environ[path_var] = path if not existing_path else f"{path}:{existing_path.strip(':')}"
 
+def _resolve(
+        instance: Any | None,
+        attr_name: str | None,
+        explicit: Any | None,
+        default: Any,
+) -> Any:
+    """Return a value using the precedence order: explicit > instance attribute > default.
 
-def retry_args(func=None, *, max_attempts=2, wait=1):
+    Args:
+        instance (Any | None):
+            The instance to check for the attribute (normally Self).
+            If None, the instance attribute check is skipped.
+        attr_name (str | None):
+            The name of the attribute to look for in the instance.
+            If None, the instance attribute check is skipped.
+        explicit (Any | None):
+            The value that was explicitly provided to the decorator.
+        default (Any):
+            The default value to return if neither explicit nor instance attribute is provided.
+    
+    Returns:
+        Any: The resolved value based on the precedence order.
     """
-    Decorator to apply retry logic to a function.
-    Can be used as @retry_args or @retry_args(max_attempts=3, wait=3).
-    Automatically uses self.max_attempts and self.wait if available.
+    if explicit is not None:
+        return explicit
+    if instance is not None and attr_name is not None:
+        return getattr(instance, attr_name, default)
+    return default
+
+def retry_args(
+        func=None,
+        *,
+        max_attempts: int | None = None,
+        wait_seconds: int | None = None,
+        max_attempts_attr: str = "retry_max_attempts",
+        wait_attr: str = "retry_wait",
+        retry_conditions: list[Callable] | Callable | None = None,
+        before_retry: Callable | None = None,
+        after_retry: Callable | None = None,
+        attempts_default: int = 2,
+        wait_default: int = 1,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
-    def decorator(inner_func):
+    Decorator to apply retry logic to a function with flexible retry conditions.
+    Can be used as @retry_args or @retry_args(max_attempts=3, wait_seconds=3).
+    
+    Args:
+        func: The function to decorate (when used without parentheses).
+        max_attempts: Maximum number of retry attempts (overrides instance attribute).
+        wait_seconds: Seconds to wait between retries (overrides instance attribute).
+        max_attempts_attr: Name of instance attribute for max_attempts (default: "retry_max_attempts").
+        wait_attr: Name of instance attribute for wait_seconds (default: "retry_wait").
+        retry_conditions: Single tenacity retry condition or list of conditions.
+            Pass any tenacity retry predicate(s) directly:
+            - Single: retry_if_result(lambda x: x is None)
+            - Multiple: [retry_if_exception_type(ConnectionError), retry_if_result(lambda x: not x)]
+            If None, retries on all exceptions (default tenacity behavior).
+        before_retry: Callback function called before each retry attempt.
+            Receives retry_state object with: attempt_number, outcome, args, kwargs, etc.
+            Example: lambda retry_state: print(f"Retry attempt {retry_state.attempt_number}")
+        after_retry: Callback function called after each retry attempt.
+            Receives retry_state object with: attempt_number, outcome, args, kwargs, etc.
+        attempts_default: Default max_attempts if not specified elsewhere.
+        wait_default: Default wait_seconds if not specified elsewhere.
+    
+    Returns:
+        Callable: The decorated function with retry logic.
+    
+    Examples:
+        # Log retry attempts
+        @retry_args(
+            retry_conditions=retry_if_exception_type(ConnectionError),
+            before_retry=lambda s: print(f"Retry {s.attempt_number}/{s.retry_object.stop.max_attempt_number}"),
+            max_attempts=3
+        )
+        def fetch(): pass
+        
+        # Access attempt info in a custom function
+        def log_retry(retry_state):
+            print(f"Attempt {retry_state.attempt_number} failed")
+            if retry_state.outcome.failed:
+                print(f"Error: {retry_state.outcome.exception()}")
+        
+        @retry_args(before_retry=log_retry)
+        def fetch(): pass
+    """
+    def decorator(inner_func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(inner_func)
         def wrapper(*args, **kwargs):
-            """Wrapper function to apply retry logic."""
-            # Default values
-            actual_max_attempts = max_attempts
-            actual_wait = wait
+            instance = args[0] if args and hasattr(args[0], "__dict__") else None
 
-            # Get config from instance if available
-            # args[0] is assumed to be 'self' if method is called on an instance
-            # self refers to the instance of the class
-            # args will not be empty if the decorated function is a method
-            if args and hasattr(args[0], '__dict__'):
-                actual_max_attempts = getattr(args[0], 'max_attempts', max_attempts)
-                actual_wait = getattr(args[0], 'wait', wait)
-            
-            # Ensure we have valid values after getting instance attributes
-            if actual_max_attempts is None:
-                actual_max_attempts = 2
-            if actual_wait is None:
-                actual_wait = 1
-            
-            # print(f"Retrying with max_attempts={actual_max_attempts}, wait={actual_wait}")  # Add this line
+            attempts = _resolve(
+                instance=instance,
+                attr_name=max_attempts_attr,
+                explicit=max_attempts,
+                default=attempts_default,
+            )
 
-            try:
-                retryer = Retrying(
-                    stop=stop_after_attempt(actual_max_attempts),
-                    wait=wait_fixed(actual_wait),
-                    reraise=True
-                )
-                return retryer(inner_func, *args, **kwargs)
-            except Exception:
-                return inner_func(*args, **kwargs)
+            wait = _resolve(
+                instance=instance,
+                attr_name=wait_attr,
+                explicit=wait_seconds,
+                default=wait_default,
+            )
+
+            if attempts < 1:
+                raise ValueError("max_attempts must be at least 1")
+            if wait < 0:
+                raise ValueError("wait_seconds cannot be negative")
+
+            # Build retry configuration
+            retry_kwargs = dict(
+                stop=stop_after_attempt(attempts),
+                wait=wait_fixed(wait),
+                reraise=True
+            )
+
+            # Handle retry conditions
+            if retry_conditions:
+                if isinstance(retry_conditions, list):
+                    if len(retry_conditions) == 1:
+                        retry_kwargs["retry"] = retry_conditions[0]
+                    else:
+                        retry_kwargs["retry"] = retry_any(*retry_conditions)
+                else:
+                    retry_kwargs["retry"] = retry_conditions
+            
+            # Add callbacks if provided
+            if before_retry is not None:
+                retry_kwargs["before"] = before_retry
+            if after_retry is not None:
+                retry_kwargs["after"] = after_retry
+            
+            retryer = Retrying(**retry_kwargs)
+            return retryer(inner_func, *args, **kwargs)
         return wrapper
-
     if func is not None:
         return decorator(func)
     return decorator
